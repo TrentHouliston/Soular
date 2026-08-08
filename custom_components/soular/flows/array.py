@@ -11,6 +11,7 @@ from custom_components.soular.const import (
     CONF_AZIMUTH,
     CONF_DC_CAPACITY,
     CONF_DC_LOSS,
+    CONF_POWER_SENSOR,
     CONF_SHADING_FILE,
     CONF_TEMPERATURE_COEFFICIENT,
     CONF_TILT,
@@ -50,6 +51,14 @@ def array_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 CONF_DC_LOSS, default=values.get(CONF_DC_LOSS, DEFAULT_DC_LOSS_PERCENT)
             ): selector.NumberSelector(selector.NumberSelectorConfig(min=0, max=50, step=0.5, unit_of_measurement="%")),
             vol.Optional(CONF_SHADING_FILE, default=values.get(CONF_SHADING_FILE, "")): selector.TextSelector(),
+            # Optional. Without it this array cannot be calibrated, which costs
+            # accuracy rather than causing a failure. An EntitySelector rejects
+            # an empty string, so the key carries a suggested value rather than a
+            # default and is simply absent when nothing is chosen.
+            vol.Optional(
+                CONF_POWER_SENSOR,
+                description={"suggested_value": values.get(CONF_POWER_SENSOR) or None},
+            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="power")),
         }
     )
 
@@ -88,7 +97,12 @@ class ArraySubentryFlow(ConfigSubentryFlow):
                     errors[CONF_SHADING_FILE] = error
 
             if not errors:
-                data = {**user_input, CONF_NAME: name, CONF_SHADING_FILE: filename}
+                data = {
+                    **user_input,
+                    CONF_NAME: name,
+                    CONF_SHADING_FILE: filename,
+                    CONF_POWER_SENSOR: str(user_input.get(CONF_POWER_SENSOR, "")).strip(),
+                }
                 if existing is not None:
                     return self.async_update_and_abort(
                         self._get_entry(), self._get_reconfigure_subentry(), data=data, title=name

@@ -166,6 +166,26 @@ ARRAY_DIAGNOSTICS: Final[tuple[ArrayDiagnosticDescription, ...]] = (
         field="cell_temperature",
     ),
     ArrayDiagnosticDescription(
+        key="correction_factor",
+        translation_key="correction_factor",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="%",
+        suggested_display_precision=1,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        # Not a forecast field: read off the learner. Handled specially in the
+        # sensor, but declared here so it shares translations and icons.
+        field="__correction__",
+    ),
+    ArrayDiagnosticDescription(
+        key="learning_samples",
+        translation_key="learning_samples",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        field="__samples__",
+    ),
+    ArrayDiagnosticDescription(
         key="shading_transmittance",
         translation_key="shading_transmittance",
         state_class=SensorStateClass.MEASUREMENT,

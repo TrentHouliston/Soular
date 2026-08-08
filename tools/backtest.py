@@ -32,7 +32,7 @@ which undershoots them by 1-3%.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import datetime as dt
 import json
@@ -54,9 +54,11 @@ from custom_components.soular.core.blend import (
     observation_from_irradiance,
     satellite_observation,
 )
-from custom_components.soular.core.clearsky import clear_sky, resample_to_grid
+from custom_components.soular.core.clearsky import clear_sky, clear_sky_index, resample_to_grid
+from custom_components.soular.core.correction import CorrectionState, build_features, observation_target, sample_weight
 from custom_components.soular.core.geometry import solar_geometry
 from custom_components.soular.core.irradiance import decompose
+from custom_components.soular.core.mask import MaskInputs, usable
 from custom_components.soular.core.pipeline import SystemSpec, WeatherSeries, forecast
 from custom_components.soular.core.shading import TransmittanceGrid, from_horizon, from_npz
 from custom_components.soular.core.types import ArraySpec, FloatArray, InverterSpec, SiteSpec, TimeArray, TimeGrid
@@ -89,6 +91,10 @@ CHANNELS_AFTER = {"PV1_POWER": "west", "PV2_POWER": "east", "PV3_POWER": "north"
 # is an option because a conclusion that moves when you change it is a conclusion
 # about the mask, not about the model.
 DEFAULT_CURTAILMENT_SOC_PCT = 97.0
+
+# Below this fraction of capacity a sample teaches more about sunrise geometry
+# than about efficiency.
+MIN_LEARNING_FRACTION = 0.03
 
 # A hard horizon is lit or not; the incumbent has no notion of partial.
 HORIZON_LIT_THRESHOLD = 0.5
@@ -299,6 +305,8 @@ class Variant:
     hard_horizon: bool = False
     # Blend recent satellite observations into the forecast by persistence.
     nowcast: bool = False
+    # Apply the online bias correction, learned strictly from the past.
+    learning: bool = False
 
 
 VARIANTS: tuple[Variant, ...] = (
@@ -312,6 +320,7 @@ VARIANTS: tuple[Variant, ...] = (
     Variant("hard-horizon", "Soular optics with a hard horizon", "forecast", hard_horizon=True),
     Variant("hard-horizon-observed", "hard horizon, satellite irradiance", "observed", hard_horizon=True),
     Variant("nowcast", "forecast irradiance plus a satellite nowcast", "forecast", nowcast=True),
+    Variant("learning", "everything, plus the online bias correction", "forecast", nowcast=True, learning=True),
 )
 
 
@@ -511,6 +520,139 @@ def _ambient(archive: Archive, grid: TimeGrid, leads: FloatArray, variable: str,
     return np.nan_to_num(values, nan=default)
 
 
+def _day_of_year(times: TimeArray) -> FloatArray:
+    """Day of year for each instant, as a float."""
+    index = pd.DatetimeIndex(pd.to_datetime(times, utc=True))
+    return np.asarray(index.strftime("%j"), dtype=np.float64)
+
+
+class Learner:
+    """Advances the online correction through the record, strictly in order.
+
+    The guarantee that matters is that no sample at or after an issue time can
+    reach the estimator serving that issue. It is enforced structurally: the
+    learner holds a cursor into the actuals and only ever moves it forward, so
+    there is no code path by which a future sample could be consumed. A test
+    corrupts the future and asserts the metrics do not move.
+    """
+
+    def __init__(
+        self,
+        site: Site,
+        actuals: Actuals,
+        shading: dict[str, TransmittanceGrid],
+        archive: Archive,
+    ) -> None:
+        """Prepare per-array estimators and precompute the geometry once."""
+        self.site = site
+        self.actuals = actuals
+        self.states = {array.name: CorrectionState() for array in site.arrays}
+        self.cursor = 0
+
+        geometry = solar_geometry(actuals.times, site.spec)
+        self.elevation = geometry.apparent_elevation
+        clearsky = clear_sky(actuals.times, site.spec, geometry).ghi
+        self.clearsky = clearsky
+        self.day_of_year = _day_of_year(actuals.times)
+        self.transmittance = {
+            array.name: (
+                shading[array.name].lookup(geometry.azimuth, geometry.apparent_elevation)
+                if array.name in shading
+                else np.ones(actuals.times.size)
+            )
+            for array in site.arrays
+        }
+        # Observed cloudiness at learning time, from the satellite. At apply time
+        # the same feature comes from the forecast, so the coefficient means the
+        # same thing on both sides: "how does the error vary with cloudiness".
+        observed = archive.observed("shortwave_radiation", actuals.times)
+        self.clearness = (
+            np.nan_to_num(clear_sky_index(observed, clearsky), nan=1.0)
+            if observed is not None
+            else np.ones(actuals.times.size)
+        )
+        self.temperature = np.full(actuals.times.size, 20.0)
+        self.predicted: dict[str, FloatArray] = {
+            array.name: np.full(actuals.times.size, np.nan) for array in site.arrays
+        }
+        self.capacity = {array.name: array.dc_capacity_w for array in site.arrays}
+
+    def record(self, rows: np.ndarray, per_array_dc: Mapping[str, FloatArray], inside: np.ndarray) -> None:
+        """Remember what the uncorrected model predicted, for later learning."""
+        for name, values in per_array_dc.items():
+            target = self.predicted[name]
+            positions = rows[inside]
+            # Keep the first prediction made for each instant: the freshest
+            # forecast at the time, which is what the learner would have had.
+            unset = np.isnan(target[positions])
+            target[positions[unset]] = values[inside][unset]
+
+    def advance_to(self, issue: np.datetime64) -> None:
+        """Learn from every masked sample strictly before ``issue``."""
+        limit = int(np.searchsorted(self.actuals.times, issue, side="left"))
+        if limit <= self.cursor:
+            return
+        window = slice(self.cursor, limit)
+        self.cursor = limit
+
+        for array in self.site.arrays:
+            name = array.name
+            predicted = self.predicted[name][window]
+            actual = self.actuals.dc_by_array[name][window]
+            if not np.isfinite(predicted).any():
+                continue
+
+            keep = usable(
+                MaskInputs(
+                    predicted_w=np.nan_to_num(predicted, nan=0.0),
+                    actual_w=np.nan_to_num(actual, nan=0.0),
+                    elevation_deg=self.elevation[window],
+                    capacity_w=self.capacity[name],
+                    soc_pct=self.actuals.soc_pct[window],
+                )
+            )
+            keep &= self.actuals.valid[window] & np.isfinite(predicted) & np.isfinite(actual)
+            if not keep.any():
+                continue
+
+            features = build_features(
+                elevation_deg=self.elevation[window][keep],
+                clearness=self.clearness[window][keep],
+                day_of_year=self.day_of_year[window][keep],
+                transmittance=self.transmittance[name][window][keep],
+                temperature_c=self.temperature[window][keep],
+            )
+            state = self.states[name]
+            floor = MIN_LEARNING_FRACTION * self.capacity[name]
+            for row, p, a in zip(features, predicted[keep], actual[keep], strict=True):
+                target = observation_target(float(a), float(p), floor_w=floor)
+                if target is not None:
+                    state.update(row, target, sample_weight(float(p), self.capacity[name]))
+
+    def apply(
+        self,
+        times: TimeArray,
+        name: str,
+        dc: FloatArray,
+        transmittance: FloatArray,
+        clearness: FloatArray,
+    ) -> FloatArray:
+        """Correct a forecast series for one array."""
+        state = self.states.get(name)
+        if state is None or state.samples == 0:
+            return dc
+        geometry = solar_geometry(times, self.site.spec)
+        day_of_year = _day_of_year(times)
+        features = build_features(
+            elevation_deg=geometry.apparent_elevation,
+            clearness=clearness,
+            day_of_year=day_of_year,
+            transmittance=transmittance,
+            temperature_c=np.full(times.size, 20.0),
+        )
+        return dc * state.correction(features)
+
+
 @dataclass
 class Accumulator:
     """Sufficient statistics for scoring a series under any scalar gain.
@@ -648,6 +790,7 @@ def run(
     names = [array.name for array in site.arrays]
     scores = {variant.name: VariantScore.empty(names) for variant in variants}
     position = {stamp: i for i, stamp in enumerate(actuals.times)}
+    learner = Learner(site, actuals, shading, archive) if any(v.learning for v in variants) else None
 
     issues = list(issue_times(start, end, every_hours))
     for number, issue in enumerate(issues, start=1):
@@ -666,6 +809,9 @@ def run(
 
         lead_hours = (times - issue).astype("timedelta64[s]").astype(np.float64) / 3600.0
         local_days = to_local_dates(times, timezone)
+        if learner is not None:
+            # Everything strictly before this issue, and nothing at or after it.
+            learner.advance_to(issue)
 
         for variant in variants:
             weather = weather_for(archive, site, grid, issue, variant.driver, nowcast=variant.nowcast)
@@ -681,6 +827,26 @@ def run(
                 result = forecast(build_system(site, shading, horizons, variant), grid, weather)
                 predicted_site = result.ac_power_w
                 per_array_dc = {entry.name: entry.dc_power_w for entry in result.arrays}
+
+                if learner is not None:
+                    learner.record(rows, per_array_dc, inside)
+                    if variant.learning:
+                        clearsky_grid = clear_sky(times, site.spec, solar_geometry(times, site.spec)).ghi
+                        clearness = np.nan_to_num(clear_sky_index(weather.ghi, clearsky_grid), nan=1.0)
+                        scale = np.zeros(times.size)
+                        total = np.zeros(times.size)
+                        for entry in result.arrays:
+                            corrected = learner.apply(
+                                times, entry.name, entry.dc_power_w, entry.transmittance, clearness
+                            )
+                            scale += corrected
+                            total += entry.dc_power_w
+                            per_array_dc[entry.name] = corrected
+                        # Scale the site AC by the same factor the DC moved, so
+                        # inverter behaviour is preserved without re-running it.
+                        with np.errstate(invalid="ignore", divide="ignore"):
+                            ratio = np.where(total > 0.0, scale / total, 1.0)
+                        predicted_site = predicted_site * ratio
 
             actual_site = np.where(usable, actuals.ac_w[np.clip(rows, 0, None)], np.nan)
 
@@ -812,8 +978,14 @@ def report(
         "",
         "## Site AC power, five-minute samples (holdout days)",
         "",
-        "| variant | gain | RMSE (W) | nRMSE | bias (W) | energy MAPE | energy median APE | n |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|",
+        "`raw` is the forecast exactly as it would be served, with no scalar fitted to",
+        "it -- what a user actually experiences. The re-scaled columns exist to compare",
+        "variants fairly, but note that re-scaling deliberately removes the constant",
+        "bias, which is the main thing the online correction is for. Judge the learner",
+        "on `raw`.",
+        "",
+        "| variant | gain | raw RMSE | raw bias | RMSE | nRMSE | bias | energy MAPE | median APE | n |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for variant in variants:
         score = scores[variant.name]
@@ -822,7 +994,8 @@ def report(
         gain = gains[variant.name]
         mean_ape, median_ape = daily_mape(score, actuals, timezone, gain)
         lines.append(
-            f"| {variant.name} | {gain:.3f} | {score.site.rmse(gain):,.0f} "
+            f"| {variant.name} | {gain:.3f} | {score.site.rmse(1.0):,.0f} | {score.site.mbe(1.0):+,.0f} "
+            f"| {score.site.rmse(gain):,.0f} "
             f"| {score.site.rmse(gain) / capacity:.1%} | {score.site.mbe(gain):+,.0f} "
             f"| {mean_ape:.1f}% | {median_ape:.1f}% | {score.site.n:,} |"
         )
@@ -904,6 +1077,24 @@ def report(
         after_rmse = after.site.rmse(gains[comparison])
         delta = 1.0 - after_rmse / before_rmse
         lines.append(f"- **{what}** ({driver} driver): RMSE {before_rmse:,.0f} W -> {after_rmse:,.0f} W, {delta:+.1%}")
+
+    if "learning" in scores and "nowcast" in scores:
+        before, after = scores["nowcast"].site, scores["learning"].site
+        if before.n and after.n:
+            lines += [
+                "",
+                "Online correction, as served (no fitted scalar):",
+                "",
+                (
+                    f"- RMSE {before.rmse(1.0):,.0f} W -> {after.rmse(1.0):,.0f} W, "
+                    f"{1.0 - after.rmse(1.0) / before.rmse(1.0):+.1%}"
+                ),
+                f"- bias {before.mbe(1.0):+,.0f} W -> {after.mbe(1.0):+,.0f} W",
+                (
+                    f"- residual scalar still needed: {scores['nowcast'].fit_site.gain:.3f} -> "
+                    f"{scores['learning'].fit_site.gain:.3f} (1.000 would be perfectly calibrated)"
+                ),
+            ]
 
     if "nowcast" in scores and "soular" in scores:
         lines += ["", "Nowcast effect by lead time, generating hours only:", ""]

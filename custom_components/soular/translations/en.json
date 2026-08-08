@@ -5,6 +5,7 @@
         "title": "Site location",
         "description": "Where your panels are. Arrays are added afterwards, one per roof plane.",
         "data": {
+          "battery_soc_sensor": "Battery state of charge",
           "elevation": "Elevation",
           "ground_type": "Ground surface",
           "inverter_ac_limit": "Inverter AC limit",
@@ -13,6 +14,7 @@
           "name": "Name"
         },
         "data_description": {
+          "battery_soc_sensor": "Optional. A full battery curtails the array at the sunniest part of the day; telling Soular about it keeps those samples out of the calibration.",
           "elevation": "Metres above sea level. Only weakly affects the clear-sky model.",
           "ground_type": "What surrounds the array. Sets the ground reflectance used for the reflected component of plane-of-array irradiance.",
           "inverter_ac_limit": "Leave empty unless your inverter actually clips. A limit set too low truncates the forecast at the sunniest part of the day.",
@@ -37,6 +39,7 @@
             "dc_capacity": "DC capacity",
             "dc_loss": "DC losses",
             "name": "Name",
+            "power_sensor": "Measured power",
             "shading_file": "Shading file",
             "temperature_coefficient": "Temperature coefficient",
             "tilt": "Tilt"
@@ -46,6 +49,7 @@
             "dc_capacity": "Total nameplate rating of the panels on this plane.",
             "dc_loss": "Soiling, wiring, mismatch and connections combined. The default suits most systems.",
             "name": "Used for this array's device and entity names.",
+            "power_sensor": "Optional. This array's actual output, used to calibrate the forecast against reality. Without it the array runs uncalibrated.",
             "shading_file": "Optional. Filename inside your Home Assistant config/soular directory. Accepts a graded transmittance grid (.npz or .csv) or a two-column horizon file (.txt).",
             "temperature_coefficient": "From the module datasheet, typically around -0.35 %/\u00b0C.",
             "tilt": "Degrees from horizontal. 0 is flat, 90 is vertical."
@@ -59,6 +63,7 @@
             "dc_capacity": "DC capacity",
             "dc_loss": "DC losses",
             "name": "Name",
+            "power_sensor": "Measured power",
             "shading_file": "Shading file",
             "temperature_coefficient": "Temperature coefficient",
             "tilt": "Tilt"
@@ -68,6 +73,7 @@
             "dc_capacity": "Total nameplate rating of the panels on this plane.",
             "dc_loss": "Soiling, wiring, mismatch and connections combined. The default suits most systems.",
             "name": "Used for this array's device and entity names.",
+            "power_sensor": "Optional. This array's actual output, used to calibrate the forecast against reality. Without it the array runs uncalibrated.",
             "shading_file": "Optional. Filename inside your Home Assistant config/soular directory. Accepts a graded transmittance grid (.npz or .csv) or a two-column horizon file (.txt).",
             "temperature_coefficient": "From the module datasheet, typically around -0.35 %/\u00b0C.",
             "tilt": "Degrees from horizontal. 0 is flat, 90 is vertical."
@@ -85,6 +91,7 @@
   "entity": {
     "sensor": {
       "cell_temperature": { "name": "Cell temperature" },
+      "correction_factor": { "name": "Learned correction" },
       "energy_current_hour": { "name": "Estimated energy production - this hour" },
       "energy_next_hour": { "name": "Estimated energy production - next hour" },
       "energy_production_today": { "name": "Estimated energy production - today" },
@@ -92,6 +99,7 @@
       "energy_production_tomorrow": { "name": "Estimated energy production - tomorrow" },
       "last_update_forecast": { "name": "Forecast last updated" },
       "last_update_satellite": { "name": "Satellite last updated" },
+      "learning_samples": { "name": "Learning samples" },
       "nowcast_share": { "name": "Nowcast contribution" },
       "poa_irradiance": { "name": "Plane-of-array irradiance" },
       "power_highest_peak_time_today": { "name": "Highest power peak time - today" },

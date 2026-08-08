@@ -15,6 +15,7 @@ import voluptuous as vol
 
 from custom_components.soular.const import (
     CONF_ALBEDO,
+    CONF_BATTERY_SOC_SENSOR,
     CONF_ELEVATION,
     CONF_GROUND_TYPE,
     CONF_INVERTER_AC_LIMIT,
@@ -55,6 +56,12 @@ def site_schema(
             # forecast at exactly the sunniest moment.
             vol.Optional(CONF_INVERTER_AC_LIMIT): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0, step=100, unit_of_measurement="W")
+            ),
+            # Optional. A full battery curtails the array at exactly the sunniest
+            # part of the day, and those samples would otherwise teach the
+            # correction that the array had lost efficiency.
+            vol.Optional(CONF_BATTERY_SOC_SENSOR): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor", device_class="battery")
             ),
         }
     )

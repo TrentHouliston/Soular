@@ -170,6 +170,14 @@ class SoularArrayDiagnosticSensor(SoularSensorBase):
         except KeyError:
             return None
 
+        # Two of these report on the learner rather than on the forecast: what
+        # the correction is currently doing, and how much evidence is behind it.
+        state = self.coordinator.learner.states.get(self._array)
+        if self.entity_description.field == "__correction__":
+            return None if state is None else state.efficiency() * 100.0
+        if self.entity_description.field == "__samples__":
+            return 0.0 if state is None else float(state.samples)
+
         values: FloatArray = getattr(entry, self.entity_description.field)
         now = np.datetime64(int(dt_util.utcnow().timestamp()), "s")
         value = power_at(result.times, values, now)

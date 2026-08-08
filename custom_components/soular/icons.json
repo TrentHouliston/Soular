@@ -4,6 +4,9 @@
       "cell_temperature": {
         "default": "mdi:thermometer"
       },
+      "correction_factor": {
+        "default": "mdi:tune-variant"
+      },
       "energy_current_hour": {
         "default": "mdi:clock-outline"
       },
@@ -24,6 +27,9 @@
       },
       "last_update_satellite": {
         "default": "mdi:satellite-uplink"
+      },
+      "learning_samples": {
+        "default": "mdi:counter"
       },
       "nowcast_share": {
         "default": "mdi:satellite-variant"

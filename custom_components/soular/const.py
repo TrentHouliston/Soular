@@ -20,6 +20,13 @@ CONF_DC_CAPACITY: Final = "dc_capacity"
 CONF_TEMPERATURE_COEFFICIENT: Final = "temperature_coefficient"
 CONF_DC_LOSS: Final = "dc_loss"
 CONF_SHADING_FILE: Final = "shading_file"
+# Optional per-array measured output. Without one the array cannot be calibrated,
+# which is a loss of accuracy rather than a failure.
+CONF_POWER_SENSOR: Final = "power_sensor"
+
+# Site-level inputs that sharpen curtailment detection. Both optional: the mask
+# has rules that need no configuration at all.
+CONF_BATTERY_SOC_SENSOR: Final = "battery_soc_sensor"
 
 # Ground reflectance presets. The incumbent integration hardcodes 0.2 for everyone;
 # exposing the choice matters most for steep tilts and snowy or bright surroundings.
@@ -50,3 +57,7 @@ RECOMPUTE_INTERVAL: Final = timedelta(minutes=5)
 # The satellite publishes every ten minutes with about half an hour of latency,
 # so polling faster than its cadence cannot learn anything new.
 SATELLITE_INTERVAL: Final = timedelta(minutes=10)
+
+# The learner samples measured output at the recompute cadence. Samples closer
+# together than this are more correlated than informative.
+LEARNING_SAMPLE_INTERVAL: Final = timedelta(minutes=5)
