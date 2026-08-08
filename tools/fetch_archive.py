@@ -33,6 +33,7 @@ import datetime as dt
 import gzip
 import hashlib
 import json
+import pathlib
 from pathlib import Path
 import re
 import sqlite3
@@ -62,6 +63,17 @@ SATELLITE_VARIABLES = (
     "shortwave_radiation",
     # Open-Meteo's own clear-sky, useful as an independent check on ours.
     "shortwave_radiation_clear_sky",
+)
+
+# What the incumbent integration actually asks for. It does not transpose: it
+# requests plane-of-array irradiance from Open-Meteo and consumes the answer, so
+# a faithful emulation has to consume the same numbers rather than a
+# reimplementation of them.
+INCUMBENT_VARIABLES = (
+    "global_tilted_irradiance",
+    "diffuse_radiation",
+    "direct_radiation",
+    "temperature_2m",
 )
 
 ENSEMBLE_VARIABLES = ("shortwave_radiation",)
@@ -99,6 +111,16 @@ CREATE TABLE IF NOT EXISTS nwp (
     variable  TEXT NOT NULL,
     value     REAL,
     PRIMARY KEY (valid_utc, lead_day, variable)
+) WITHOUT ROWID;
+
+-- Plane-of-array irradiance as the incumbent integration receives it, per array.
+CREATE TABLE IF NOT EXISTS gti (
+    array_name TEXT NOT NULL,
+    valid_utc  TEXT NOT NULL,
+    lead_day   INTEGER NOT NULL,
+    variable   TEXT NOT NULL,
+    value      REAL,
+    PRIMARY KEY (array_name, valid_utc, lead_day, variable)
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS satellite (
@@ -260,6 +282,69 @@ def _ingest_nwp(connection: sqlite3.Connection, payload: dict[str, Any], max_lea
 
     connection.executemany("INSERT OR REPLACE INTO nwp VALUES (?, ?, ?, ?)", records)
     return len(records)
+
+
+def fetch_gti(
+    connection: sqlite3.Connection,
+    latitude: float,
+    longitude: float,
+    start: dt.date,
+    end: dt.date,
+    max_lead_days: int,
+    arrays: list[tuple[str, float, float]],
+) -> int:
+    """Pull tilted irradiance per array, as the incumbent integration receives it.
+
+    Open-Meteo measures panel azimuth from south, positive westward; every Home
+    Assistant integration uses compass degrees from north. The incumbent converts
+    with ``azimuth - 180``, and so does this.
+    """
+    requested: list[str] = []
+    for variable in INCUMBENT_VARIABLES:
+        requested.append(variable)
+        requested.extend(f"{variable}_previous_day{lead}" for lead in range(1, max_lead_days + 1))
+
+    rows = 0
+    for name, tilt, compass_azimuth in arrays:
+        for chunk_start, chunk_end in date_chunks(start, end, NWP_CHUNK_DAYS):
+            params = {
+                "latitude": f"{latitude:.6f}",
+                "longitude": f"{longitude:.6f}",
+                "tilt": f"{tilt:.1f}",
+                "azimuth": f"{compass_azimuth - 180.0:.1f}",
+                "hourly": ",".join(requested),
+                "start_date": chunk_start.isoformat(),
+                "end_date": chunk_end.isoformat(),
+                "timezone": "UTC",
+            }
+            key = request_key(f"gti:{name}", params)
+            if already_fetched(connection, key):
+                print(f"  gti {name} {chunk_start}..{chunk_end}: cached")
+                continue
+
+            print(f"  gti {name} {chunk_start}..{chunk_end}: fetching")
+            payload = fetch_json(NWP_URL, params)
+            store_raw(connection, key, "gti", NWP_URL, payload)
+
+            block = _series(payload)
+            times: list[str] = block["time"]
+            records: list[tuple[str, str, int, str, float | None]] = []
+            for variable in INCUMBENT_VARIABLES:
+                for lead in range(max_lead_days + 1):
+                    column = variable if lead == 0 else f"{variable}_previous_day{lead}"
+                    values = block.get(column)
+                    if values is None:
+                        continue
+                    records.extend(
+                        (name, stamp, lead, variable, value)
+                        for stamp, value in zip(times, values, strict=True)
+                        if value is not None
+                    )
+            connection.executemany("INSERT OR REPLACE INTO gti VALUES (?, ?, ?, ?, ?)", records)
+            connection.commit()
+            rows += len(records)
+            time.sleep(REQUEST_PAUSE_SECONDS)
+    return rows
 
 
 def fetch_satellite(
@@ -478,7 +563,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--feeds",
         default="nwp,satellite,ensemble",
-        help="comma-separated subset of nwp, satellite, ensemble",
+        help="comma-separated subset of nwp, satellite, ensemble, gti",
+    )
+    parser.add_argument(
+        "--arrays",
+        help="path to arrays.toml, required for the gti feed",
     )
     parser.add_argument("--max-lead-days", type=int, default=DEFAULT_MAX_LEAD_DAYS)
     args = parser.parse_args(argv)
@@ -487,7 +576,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--start must not be after --end")
 
     feeds = {feed.strip() for feed in args.feeds.split(",") if feed.strip()}
-    unknown = feeds - {"nwp", "satellite", "ensemble"}
+    unknown = feeds - {"nwp", "satellite", "ensemble", "gti"}
     if unknown:
         parser.error(f"unknown feeds: {sorted(unknown)}")
 
@@ -501,6 +590,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         if "satellite" in feeds:
             print("\nSatellite (Himawari, native 10-minute):")
             fetch_satellite(connection, args.latitude, args.longitude, args.start, args.end)
+        if "gti" in feeds:
+            if not args.arrays:
+                parser.error("--arrays is required for the gti feed")
+            import tomllib  # noqa: PLC0415
+
+            config = tomllib.loads(pathlib.Path(args.arrays).read_text())
+            arrays = [
+                (name, float(entry["tilt"]), float(entry["azimuth"]))
+                for name, entry in sorted(config["arrays"].items())
+            ]
+            print("\nTilted irradiance (as the incumbent integration receives it):")
+            fetch_gti(connection, args.latitude, args.longitude, args.start, args.end, args.max_lead_days, arrays)
         if "ensemble" in feeds:
             print("\nEnsemble (ECMWF IFS, 51 members):")
             fetch_ensemble(connection, args.latitude, args.longitude, args.start, args.end)

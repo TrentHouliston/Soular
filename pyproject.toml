@@ -221,7 +221,23 @@ allow_modules = ["aiohttp", "homeassistant", "numpy"]
 name = "backtest CLI only uses core"
 type = "allowlist"
 source_modules = ["tools.backtest"]
-allow_modules = ["custom_components.soular.core", "matplotlib", "numpy", "pandas", "tabulate"]
+allow_modules = [
+    "custom_components.soular.core",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "tabulate",
+    # The emulation of the competing integration.
+    "tools.incumbent",
+]
+
+# The emulation must share nothing with soular's model, or the comparison would
+# be measuring this project against a copy of itself. numpy only.
+[[tool.importlinter.contracts]]
+name = "the incumbent emulation shares nothing with soular"
+type = "allowlist"
+source_modules = ["tools.incumbent"]
+allow_modules = ["numpy"]
 
 [tool.setuptools]
 package-dir = { "" = "." }

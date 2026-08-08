@@ -35,6 +35,15 @@ Every one of those claims is checked by an offline harness (`tools/backtest.py`)
 the model against measured production, at honest lead times, with each variant separately
 re-scaled so an ablation measures skill rather than bias.
 
+## Does it actually do better?
+
+Against `ha-open-meteo-solar-forecast` on 297 days of measured five-minute production,
+with that integration emulated from its own source and fed the same tilted irradiance it
+really consumes: **27.7% lower RMSE and 85% less bias as served**, narrowing to 4.8% once
+both sides are given an oracle-fitted scalar. Most of the practical gap is calibration,
+which soular learns and the incumbent expects you to type in. Full numbers, decomposition
+and caveats in [docs/vs-open-meteo-solar-forecast.md](docs/vs-open-meteo-solar-forecast.md).
+
 ## Status
 
 Early development. See `docs/` for the design and the measured skill numbers.

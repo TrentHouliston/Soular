@@ -62,6 +62,7 @@ from custom_components.soular.core.mask import MaskInputs, usable
 from custom_components.soular.core.pipeline import SystemSpec, WeatherSeries, forecast
 from custom_components.soular.core.shading import TransmittanceGrid, from_horizon, from_npz
 from custom_components.soular.core.types import ArraySpec, FloatArray, InverterSpec, SiteSpec, TimeArray, TimeGrid
+from tools.incumbent import IncumbentArray, TiltedArchive, forecast_site
 
 if TYPE_CHECKING:  # pragma: no cover
     from collections.abc import Iterator
@@ -307,6 +308,10 @@ class Variant:
     nowcast: bool = False
     # Apply the online bias correction, learned strictly from the past.
     learning: bool = False
+    # Run the faithful emulation of the incumbent integration instead of soular.
+    upstream: bool = False
+    # Reproduce upstream's quarter-hour labelling offset. Off isolates it.
+    upstream_label_offset: bool = True
 
 
 VARIANTS: tuple[Variant, ...] = (
@@ -321,6 +326,14 @@ VARIANTS: tuple[Variant, ...] = (
     Variant("hard-horizon-observed", "hard horizon, satellite irradiance", "observed", hard_horizon=True),
     Variant("nowcast", "forecast irradiance plus a satellite nowcast", "forecast", nowcast=True),
     Variant("learning", "everything, plus the online bias correction", "forecast", nowcast=True, learning=True),
+    Variant("upstream", "ha-open-meteo-solar-forecast, as it actually runs", "forecast", upstream=True),
+    Variant(
+        "upstream-no-offset",
+        "the same, without its quarter-hour labelling offset",
+        "forecast",
+        upstream=True,
+        upstream_label_offset=False,
+    ),
 )
 
 
@@ -467,6 +480,63 @@ def weather_for(
         if observations:
             series, _ = apply_to_weather(series, grid.times, clearsky.ghi, geometry, observations)
     return series
+
+
+def _upstream_forecast(
+    site: Site,
+    tilted: TiltedArchive,
+    horizons: dict[str, TransmittanceGrid],
+    times: TimeArray,
+    leads: FloatArray,
+    variant: Variant,
+) -> FloatArray:
+    """Run the incumbent integration's own model on its own quarter-hour grid.
+
+    It works at fifteen minutes, so the emulation does too and the result is
+    interpolated up. Interpolating rather than stepping is the generous reading:
+    the integration serves a step function, but penalising it for that artefact
+    would measure resolution rather than skill.
+    """
+    quarter = np.arange(times[0], times[-1] + np.timedelta64(STEP_SECONDS, "s"), np.timedelta64(900, "s")).astype(
+        "datetime64[s]"
+    )
+    quarter_leads = np.interp(
+        quarter.astype(np.int64).astype(np.float64),
+        times.astype(np.int64).astype(np.float64),
+        leads,
+    )
+
+    geometry = solar_geometry(quarter, site.spec)
+    blocked = {
+        name: grid.lookup(geometry.azimuth, geometry.apparent_elevation) < HORIZON_LIT_THRESHOLD
+        for name, grid in horizons.items()
+    }
+    arrays = [
+        IncumbentArray(
+            name=array.name,
+            dc_watts=array.dc_capacity_w,
+            azimuth_deg=array.azimuth_deg,
+            tilt_deg=array.tilt_deg,
+        )
+        for array in site.arrays
+    ]
+    power = forecast_site(
+        arrays,
+        tilted,
+        quarter,
+        quarter_leads,
+        blocked,
+        site.inverter.ac_limit_w,
+        label_offset=variant.upstream_label_offset,
+    )
+    return np.asarray(
+        np.interp(
+            times.astype(np.int64).astype(np.float64),
+            quarter.astype(np.int64).astype(np.float64),
+            power,
+        ),
+        dtype=np.float64,
+    )
 
 
 def _satellite_observations(archive: Archive, site: Site, issue: np.datetime64) -> list[Observation]:
@@ -785,12 +855,15 @@ def run(
     end: dt.date,
     every_hours: int,
     timezone: ZoneInfo,
+    *,
+    cache: Path,
 ) -> dict[str, VariantScore]:
     """Replay every issue time through every variant and accumulate scores."""
     names = [array.name for array in site.arrays]
     scores = {variant.name: VariantScore.empty(names) for variant in variants}
     position = {stamp: i for i, stamp in enumerate(actuals.times)}
     learner = Learner(site, actuals, shading, archive) if any(v.learning for v in variants) else None
+    tilted = TiltedArchive(cache) if any(v.upstream for v in variants) else None
 
     issues = list(issue_times(start, end, every_hours))
     for number, issue in enumerate(issues, start=1):
@@ -820,7 +893,12 @@ def run(
 
             score = scores[variant.name]
             fitting = is_fit_day(local_days[0])
-            if variant.incumbent:
+            if variant.upstream:
+                if tilted is None or not tilted.available():
+                    continue
+                predicted_site = _upstream_forecast(site, tilted, horizons, times, lead_days(issue, times), variant)
+                per_array_dc = {}
+            elif variant.incumbent:
                 predicted_site = incumbent_forecast(site, horizons, grid, weather)
                 per_array_dc: dict[str, FloatArray] = {}
             else:
@@ -1063,6 +1141,8 @@ def report(
         ("forecast", "incumbent", "soular", "everything, vs the incumbent"),
         ("observed", "no-shading-observed", "soular-observed", "graded shading, weather removed"),
         ("observed", "no-perez-observed", "soular-observed", "Perez transposition, weather removed"),
+        ("forecast", "upstream", "learning", "soular in full, vs the incumbent integration"),
+        ("forecast", "upstream", "upstream-no-offset", "the incumbent's quarter-hour labelling offset"),
         ("forecast", "no-shading", "hard-horizon", "a hard horizon, vs no shading at all"),
         ("forecast", "hard-horizon", "soular", "grading the shading, vs a hard horizon"),
         ("observed", "hard-horizon-observed", "soular-observed", "grading the shading, weather removed"),
@@ -1187,7 +1267,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         variants = [v for v in variants if v.name in wanted]
     print(f"Replaying {len(variants)} variants from {args.start} to {args.end}")
     scores = run(
-        site, shading, horizons, archive, actuals, variants, args.start, args.end, args.issue_every, site.timezone
+        site,
+        shading,
+        horizons,
+        archive,
+        actuals,
+        variants,
+        args.start,
+        args.end,
+        args.issue_every,
+        site.timezone,
+        cache=args.cache,
     )
 
     text = report(scores, actuals, site, variants, site.timezone)
