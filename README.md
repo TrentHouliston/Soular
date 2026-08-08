@@ -7,18 +7,33 @@ Solar production forecasting for Home Assistant, built for accuracy rather than 
 Most Home Assistant solar forecasts ask a weather API for plane-of-array irradiance and
 scale it by a nameplate rating. That hides several approximations that matter:
 
-- **Isotropic sky.** Open-Meteo's `global_tilted_irradiance` uses an isotropic diffuse model
-    with a hardcoded albedo of 0.2. It has no circumsolar brightening and no horizon band, so
-    it under-reads clear-sky plane-of-array irradiance on a tilted plane.
 - **Binary shading.** A horizon polyline says "blocked" or "not blocked". Real trees are
-    porous and shade partially across a band of elevations.
+    porous and shade partially across a band of elevations. This is the big one: on the site
+    Soular was built against, a measured graded transmittance map cuts site RMSE by around
+    15% once weather error is taken out of the comparison, and by more than 20% on the two
+    worst-affected arrays.
 - **No feedback.** Your inverter knows exactly how wrong yesterday's forecast was, and
     nothing reads it.
 - **A single number.** A point estimate can't tell a battery optimiser how much to hedge.
+- **Isotropic sky.** Open-Meteo's `global_tilted_irradiance` uses an isotropic diffuse model
+    with a hardcoded albedo of 0.2 — no circumsolar brightening, no horizon band.
+
+That last one deserves an honest caveat, because it is the one most often oversold. Perez
+transposition really does collect more irradiance than isotropic — measured here as +1.9%
+annually at 25° tilt, rising to +5.0% at 90° — but most of that is a constant scale factor,
+and any fitted or learned efficiency absorbs a constant. What survives calibration is the
+*shape* error, which is 0.75% at 25° tilt and 1.8% at 90°. So Perez is the right default and
+it matters for getting absolute kWh right without calibration, but at a typical roof pitch it
+is not where the accuracy comes from. Soular uses it because it is free and correct, not
+because it is the headline.
 
 Soular does its own Perez transposition, applies a measured graded transmittance map, blends
 satellite observations and your own array into the near-term forecast, produces P10/P50/P90
 from NWP ensembles, and continuously bias-corrects against your measured output.
+
+Every one of those claims is checked by an offline harness (`tools/backtest.py`) that replays
+the model against measured production, at honest lead times, with each variant separately
+re-scaled so an ablation measures skill rather than bias.
 
 ## Status
 

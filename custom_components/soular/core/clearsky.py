@@ -107,3 +107,60 @@ def clear_sky_index(ghi: FloatArray, clearsky_ghi: FloatArray) -> FloatArray:
 def apply_clear_sky_index(k: FloatArray, clearsky_ghi: FloatArray) -> FloatArray:
     """Reconstruct GHI from a clear-sky index. Inverse of :func:`clear_sky_index`."""
     return np.asarray(np.where(np.isnan(k), 0.0, k * clearsky_ghi), dtype=np.float64)
+
+
+def fill_gaps(k: FloatArray) -> FloatArray:
+    """Carry the nearest defined clear-sky index across night and missing samples.
+
+    Cloudiness is persistent, so the nearest known value is a far better guess
+    than any constant. This matters most at dawn, where the first defined sample
+    of the day would otherwise have nothing behind it to interpolate from.
+    """
+    values = np.asarray(k, dtype=np.float64)
+    defined = ~np.isnan(values)
+    if not defined.any():
+        return np.ones_like(values)
+
+    positions = np.arange(values.size)
+    return np.asarray(np.interp(positions, positions[defined], values[defined]), dtype=np.float64)
+
+
+def resample_to_grid(
+    interval_starts: TimeArray,
+    interval_ends: TimeArray,
+    interval_mean_ghi: FloatArray,
+    grid_times: TimeArray,
+    grid_clearsky_ghi: FloatArray,
+    site: SiteSpec,
+) -> FloatArray:
+    """Turn coarse interval-mean GHI into instantaneous GHI on a fine grid.
+
+    The obvious approach -- interpolate GHI directly -- is wrong twice over. It
+    treats an interval mean as an instantaneous value, which shifts the whole
+    series by half an interval; and it interpolates a quantity with a hard
+    diurnal envelope, which shaves the peak and smears sunrise and sunset.
+
+    Working in clear-sky index fixes both. The mean is divided by clear sky
+    averaged over the *same* interval, so the ratio is dimensionally what it
+    claims to be; and the ratio is smooth, so interpolating it is benign. The
+    diurnal shape then comes back from the fine grid's own clear sky.
+    """
+    if not (interval_starts.shape == interval_ends.shape == interval_mean_ghi.shape):
+        msg = "interval bounds and values must have matching shapes"
+        raise ValueError(msg)
+    if interval_starts.size == 0:
+        msg = "cannot resample from an empty set of intervals"
+        raise ValueError(msg)
+
+    clearsky_mean = clear_sky_ghi_mean(interval_starts, interval_ends, site)
+    k = fill_gaps(clear_sky_index(interval_mean_ghi, clearsky_mean))
+
+    # An interval mean is most representative of the interval's midpoint, so that
+    # is where the ratio is anchored before interpolating.
+    starts = interval_starts.astype("datetime64[s]").astype(np.int64)
+    ends = interval_ends.astype("datetime64[s]").astype(np.int64)
+    midpoints = (starts + ends) / 2.0
+
+    grid_seconds = grid_times.astype("datetime64[s]").astype(np.int64).astype(np.float64)
+    k_grid = np.interp(grid_seconds, midpoints, k)
+    return apply_clear_sky_index(np.asarray(k_grid, dtype=np.float64), grid_clearsky_ghi)

@@ -7,8 +7,9 @@ requires-python = ">=3.13.2,<3.14"
 
 dependencies = ["homeassistant>=2026.1.1", "numpy>=2.3.2", "pvlib>=0.15.2"]
 
-# Console scripts for the backtest harness are declared in Phase 2, once the
-# modules they point at exist.
+[project.scripts]
+backtest = "tools.backtest:main"
+fetch-archive = "tools.fetch_archive:main"
 
 [dependency-groups]
 dev = [
@@ -204,8 +205,13 @@ type = "allowlist"
 source_modules = ["custom_components.soular.sources"]
 allow_modules = ["aiohttp", "homeassistant", "numpy"]
 
-# The "backtest CLI only uses core" contract is added in Phase 2, alongside the
-# module it constrains.
+# The harness must reach the model only through `core`, so a skill number it
+# reports describes the shipped model rather than a parallel implementation.
+[[tool.importlinter.contracts]]
+name = "backtest CLI only uses core"
+type = "allowlist"
+source_modules = ["tools.backtest"]
+allow_modules = ["custom_components.soular.core", "matplotlib", "numpy", "pandas", "tabulate"]
 
 [tool.setuptools]
 package-dir = { "" = "." }
