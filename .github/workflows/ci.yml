@@ -238,9 +238,18 @@ jobs:
           report_type: test_results
 
       - name: Upload coverage to Codecov
-        if: ${{ github.event_name != 'release' && !cancelled() }}
+        # Skipped until CODECOV_TOKEN is set, because a tokenless upload is
+        # rejected outright and would fail the run for a reason that has nothing
+        # to do with the tests. Strict once the token exists: a coverage report
+        # that silently stops being uploaded is a report nobody is reading.
+        # The secrets context is not readable from a step-level 'if', so the
+        # token is lifted into env first and the condition tests that.
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        if: ${{ github.event_name != 'release' && !cancelled() && env.CODECOV_TOKEN != '' }}
         uses: codecov/codecov-action@e53489f4d376d79066609109e7a95a29eb3740b1 # v7.0.0
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           flags: python
           fail_ci_if_error: true
   #endregion
