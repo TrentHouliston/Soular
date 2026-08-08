@@ -1,0 +1,24 @@
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    ignore:
+      # Home Assistant must match the homeassistant key in hacs.json, which the
+      # version-check CI job enforces. Bumping it here would break that pairing.
+      - dependency-name: "homeassistant"
+    groups:
+      pip-dependencies:
+        patterns:
+          - "*"

@@ -1,0 +1,14 @@
+{
+  "domain": "soular",
+  "name": "Soular",
+  "after_dependencies": ["recorder"],
+  "codeowners": ["@TrentHouliston"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/TrentHouliston/soular",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/TrentHouliston/soular/issues",
+  "requirements": ["numpy>=2.3.2", "pvlib>=0.15.2"],
+  "version": "0.1.0"
+}

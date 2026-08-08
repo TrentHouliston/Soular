@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Site location",
+        "description": "Where your panels are. Arrays are added afterwards, one per roof plane.",
+        "data": {
+          "elevation": "Elevation",
+          "ground_type": "Ground surface",
+          "latitude": "Latitude",
+          "longitude": "Longitude",
+          "name": "Name"
+        },
+        "data_description": {
+          "elevation": "Metres above sea level. Only weakly affects the clear-sky model.",
+          "ground_type": "What surrounds the array. Sets the ground reflectance used for the reflected component of plane-of-array irradiance.",
+          "latitude": "Decimal degrees, north positive.",
+          "longitude": "Decimal degrees, east positive.",
+          "name": "Shown on the site device and used to name its entities."
+        }
+      }
+    },
+    "abort": { "already_configured": "A site is already configured at this location." }
+  },
+  "selector": {
+    "ground_type": {
+      "options": {
+        "concrete": "Concrete or light gravel",
+        "grass": "Grass or vegetation",
+        "snow": "Snow",
+        "urban": "Dark roof or asphalt"
+      }
+    }
+  }
+}
