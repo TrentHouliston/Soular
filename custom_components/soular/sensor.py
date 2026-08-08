@@ -6,8 +6,12 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from custom_components.soular import SoularConfigEntry
 from custom_components.soular.const import SUBENTRY_TYPE_ARRAY
-from custom_components.soular.entities import ARRAY_DIAGNOSTICS, SENSOR_DESCRIPTIONS
-from custom_components.soular.entities.sensor import SoularArrayDiagnosticSensor, SoularForecastSensor
+from custom_components.soular.entities import ARRAY_DIAGNOSTICS, SENSOR_DESCRIPTIONS, SITE_DIAGNOSTICS
+from custom_components.soular.entities.sensor import (
+    SoularArrayDiagnosticSensor,
+    SoularForecastSensor,
+    SoularSiteDiagnosticSensor,
+)
 from custom_components.soular.system import site_name
 
 # The coordinator pushes; entities never poll independently.
@@ -29,6 +33,9 @@ async def async_setup_entry(
     entities: list[SensorEntity] = [
         SoularForecastSensor(coordinator, description, entry, name) for description in SENSOR_DESCRIPTIONS
     ]
+    entities.extend(
+        SoularSiteDiagnosticSensor(coordinator, description, entry, name) for description in SITE_DIAGNOSTICS
+    )
     async_add_entities(entities)
 
     for subentry in entry.subentries.values():

@@ -12,7 +12,12 @@ import numpy as np
 from custom_components.soular.coordinator.coordinator import SoularCoordinator
 from custom_components.soular.core.series import power_at
 from custom_components.soular.core.types import FloatArray, TimeArray
-from custom_components.soular.entities import ArrayDiagnosticDescription, SoularSensorEntityDescription, Window
+from custom_components.soular.entities import (
+    ArrayDiagnosticDescription,
+    SiteDiagnosticDescription,
+    SoularSensorEntityDescription,
+    Window,
+)
 from custom_components.soular.entities.device import array_device, array_identifier, site_device, site_identifier
 
 # A 48-hour mixed-resolution series is ~350 points and about 20 kB of JSON.
@@ -170,5 +175,38 @@ class SoularArrayDiagnosticSensor(SoularSensorBase):
         value = power_at(result.times, values, now)
         # Transmittance is a fraction in the model and a percentage on a dashboard.
         if self.entity_description.key == "shading_transmittance":
+            return value * 100.0
+        return value
+
+
+class SoularSiteDiagnosticSensor(SoularSensorBase):
+    """A site-level diagnostic read straight off the coordinator.
+
+    These answer "why does the forecast look like that?" rather than "what will
+    it produce". They start disabled; a user who never asks the question should
+    not have to see the answer.
+    """
+
+    entity_description: SiteDiagnosticDescription
+
+    def __init__(
+        self,
+        coordinator: SoularCoordinator,
+        description: SiteDiagnosticDescription,
+        entry: ConfigEntry,
+        site_name: str,
+    ) -> None:
+        """Set up a site diagnostic sensor."""
+        identifier = site_identifier(entry)
+        super().__init__(coordinator, f"{identifier[1]}_{description.key}")
+        self.entity_description = description
+        self._attr_device_info = site_device(entry, site_name)
+
+    @property
+    def native_value(self) -> Any:
+        """Read the coordinator attribute this sensor reports."""
+        value = getattr(self.coordinator, self.entity_description.attribute, None)
+        # A share is a fraction in the model and a percentage on a dashboard.
+        if isinstance(value, float) and self.entity_description.key == "nowcast_share":
             return value * 100.0
         return value

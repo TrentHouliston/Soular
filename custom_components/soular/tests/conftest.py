@@ -23,6 +23,7 @@ from custom_components.soular.const import (
     SUBENTRY_TYPE_ARRAY,
 )
 from custom_components.soular.sources.open_meteo import HourlyWeather
+from custom_components.soular.sources.satellite import SatelliteError, SatelliteObservations
 
 SITE_DATA = {
     CONF_NAME: "Morisset Park",
@@ -73,15 +74,59 @@ def synthetic_weather(hours: int = 96) -> HourlyWeather:
     )
 
 
+def synthetic_satellite(hours: int = 3) -> SatelliteObservations:
+    """Recent observed irradiance, ending about half an hour ago.
+
+    The lag is the point: the satellite is always published in arrears, so a
+    fixture that pretends to be current would never exercise the code that
+    handles latency.
+    """
+    now = int(dt_util.utcnow().timestamp())
+    end = np.datetime64(now - now % 600 - 30 * 60, "s")
+    times = np.arange(end - np.timedelta64(hours * 3600, "s"), end, np.timedelta64(600, "s")).astype("datetime64[s]")
+    hour_of_day = (times.astype("datetime64[s]").astype(np.int64) / 3600.0) % 24
+    daylight = np.clip(np.cos((hour_of_day - 2) / 24.0 * 2 * np.pi), 0.0, None)
+    return SatelliteObservations(times=times, ghi=700.0 * daylight)
+
+
 @pytest.fixture
 def mock_weather() -> Generator[Any]:
-    """Serve a synthetic forecast instead of calling Open-Meteo."""
+    """Serve synthetic weather and satellite data instead of calling the network."""
+    weather = synthetic_weather()
+    observations = synthetic_satellite()
+
+    async def _fetch(*_args: Any, **_kwargs: Any) -> HourlyWeather:
+        return weather
+
+    async def _fetch_satellite(*_args: Any, **_kwargs: Any) -> SatelliteObservations:
+        return observations
+
+    with (
+        patch("custom_components.soular.coordinator.coordinator.fetch", side_effect=_fetch) as mocked,
+        patch(
+            "custom_components.soular.coordinator.coordinator.satellite_source.fetch",
+            side_effect=_fetch_satellite,
+        ),
+    ):
+        yield mocked
+
+
+@pytest.fixture
+def no_satellite() -> Generator[Any]:
+    """Make the satellite source fail, to exercise graceful degradation."""
     weather = synthetic_weather()
 
     async def _fetch(*_args: Any, **_kwargs: Any) -> HourlyWeather:
         return weather
 
-    with patch("custom_components.soular.coordinator.coordinator.fetch", side_effect=_fetch) as mocked:
+    async def _fail(*_args: Any, **_kwargs: Any) -> SatelliteObservations:
+        message = "satellite unavailable"
+        raise SatelliteError(message)
+
+    with (
+        patch("custom_components.soular.coordinator.coordinator.fetch", side_effect=_fetch),
+        patch("custom_components.soular.coordinator.coordinator.satellite_source.fetch", side_effect=_fail) as mocked,
+    ):
         yield mocked
 
 

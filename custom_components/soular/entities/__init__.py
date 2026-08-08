@@ -178,4 +178,46 @@ ARRAY_DIAGNOSTICS: Final[tuple[ArrayDiagnosticDescription, ...]] = (
 )
 
 DIAGNOSTIC_KEYS: Final[frozenset[str]] = frozenset(entry.key for entry in ARRAY_DIAGNOSTICS)
-ALL_SENSOR_KEYS: Final[frozenset[str]] = SENSOR_KEYS | DIAGNOSTIC_KEYS
+
+
+@dataclass(frozen=True, kw_only=True)
+class SiteDiagnosticDescription(SensorEntityDescription):
+    """A site-level diagnostic read off the coordinator itself."""
+
+    attribute: str
+
+
+SITE_DIAGNOSTICS: Final[tuple[SiteDiagnosticDescription, ...]] = (
+    SiteDiagnosticDescription(
+        key="nowcast_share",
+        translation_key="nowcast_share",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="%",
+        suggested_display_precision=0,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        # How much of the next hour came from observation rather than the weather
+        # model. Zero means the satellite is unavailable or the sun is down, and
+        # the forecast is the model alone.
+        attribute="observed_share",
+    ),
+    SiteDiagnosticDescription(
+        key="last_update_forecast",
+        translation_key="last_update_forecast",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        attribute="weather_fetched_at",
+    ),
+    SiteDiagnosticDescription(
+        key="last_update_satellite",
+        translation_key="last_update_satellite",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        attribute="satellite_fetched_at",
+    ),
+)
+
+SITE_DIAGNOSTIC_KEYS: Final[frozenset[str]] = frozenset(entry.key for entry in SITE_DIAGNOSTICS)
+ALL_SENSOR_KEYS: Final[frozenset[str]] = SENSOR_KEYS | DIAGNOSTIC_KEYS | SITE_DIAGNOSTIC_KEYS

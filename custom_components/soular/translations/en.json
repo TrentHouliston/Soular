@@ -47,7 +47,7 @@
             "dc_loss": "Soiling, wiring, mismatch and connections combined. The default suits most systems.",
             "name": "Used for this array's device and entity names.",
             "shading_file": "Optional. Filename inside your Home Assistant config/soular directory. Accepts a graded transmittance grid (.npz or .csv) or a two-column horizon file (.txt).",
-            "temperature_coefficient": "From the module datasheet, typically around -0.35 %/°C.",
+            "temperature_coefficient": "From the module datasheet, typically around -0.35 %/\u00b0C.",
             "tilt": "Degrees from horizontal. 0 is flat, 90 is vertical."
           }
         },
@@ -69,7 +69,7 @@
             "dc_loss": "Soiling, wiring, mismatch and connections combined. The default suits most systems.",
             "name": "Used for this array's device and entity names.",
             "shading_file": "Optional. Filename inside your Home Assistant config/soular directory. Accepts a graded transmittance grid (.npz or .csv) or a two-column horizon file (.txt).",
-            "temperature_coefficient": "From the module datasheet, typically around -0.35 %/°C.",
+            "temperature_coefficient": "From the module datasheet, typically around -0.35 %/\u00b0C.",
             "tilt": "Degrees from horizontal. 0 is flat, 90 is vertical."
           }
         }
@@ -90,6 +90,9 @@
       "energy_production_today": { "name": "Estimated energy production - today" },
       "energy_production_today_remaining": { "name": "Estimated energy production - remaining today" },
       "energy_production_tomorrow": { "name": "Estimated energy production - tomorrow" },
+      "last_update_forecast": { "name": "Forecast last updated" },
+      "last_update_satellite": { "name": "Satellite last updated" },
+      "nowcast_share": { "name": "Nowcast contribution" },
       "poa_irradiance": { "name": "Plane-of-array irradiance" },
       "power_highest_peak_time_today": { "name": "Highest power peak time - today" },
       "power_highest_peak_time_tomorrow": { "name": "Highest power peak time - tomorrow" },

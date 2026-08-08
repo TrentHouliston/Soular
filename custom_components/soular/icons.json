@@ -1,17 +1,48 @@
 {
   "entity": {
     "sensor": {
-      "cell_temperature": { "default": "mdi:thermometer" },
-      "energy_current_hour": { "default": "mdi:clock-outline" },
-      "energy_next_hour": { "default": "mdi:clock-fast" },
-      "energy_production_today": { "default": "mdi:solar-power-variant" },
-      "energy_production_today_remaining": { "default": "mdi:solar-power-variant-outline" },
-      "energy_production_tomorrow": { "default": "mdi:solar-power-variant" },
-      "poa_irradiance": { "default": "mdi:sun-wireless" },
-      "power_highest_peak_time_today": { "default": "mdi:weather-sunny" },
-      "power_highest_peak_time_tomorrow": { "default": "mdi:weather-sunny" },
-      "power_production_now": { "default": "mdi:solar-power" },
-      "shading_transmittance": { "default": "mdi:tree-outline" }
+      "cell_temperature": {
+        "default": "mdi:thermometer"
+      },
+      "energy_current_hour": {
+        "default": "mdi:clock-outline"
+      },
+      "energy_next_hour": {
+        "default": "mdi:clock-fast"
+      },
+      "energy_production_today": {
+        "default": "mdi:solar-power-variant"
+      },
+      "energy_production_today_remaining": {
+        "default": "mdi:solar-power-variant-outline"
+      },
+      "energy_production_tomorrow": {
+        "default": "mdi:solar-power-variant"
+      },
+      "last_update_forecast": {
+        "default": "mdi:cloud-download-outline"
+      },
+      "last_update_satellite": {
+        "default": "mdi:satellite-uplink"
+      },
+      "nowcast_share": {
+        "default": "mdi:satellite-variant"
+      },
+      "poa_irradiance": {
+        "default": "mdi:sun-wireless"
+      },
+      "power_highest_peak_time_today": {
+        "default": "mdi:weather-sunny"
+      },
+      "power_highest_peak_time_tomorrow": {
+        "default": "mdi:weather-sunny"
+      },
+      "power_production_now": {
+        "default": "mdi:solar-power"
+      },
+      "shading_transmittance": {
+        "default": "mdi:tree-outline"
+      }
     }
   }
 }

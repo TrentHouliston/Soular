@@ -47,3 +47,6 @@ SHADING_DIRECTORY: Final = "soular"
 # continuously even when the weather does not.
 UPDATE_INTERVAL: Final = timedelta(minutes=30)
 RECOMPUTE_INTERVAL: Final = timedelta(minutes=5)
+# The satellite publishes every ten minutes with about half an hour of latency,
+# so polling faster than its cadence cannot learn anything new.
+SATELLITE_INTERVAL: Final = timedelta(minutes=10)

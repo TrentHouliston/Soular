@@ -48,7 +48,8 @@ import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
 
-from custom_components.soular.core.clearsky import clear_sky, resample_to_grid
+from custom_components.soular.core.blend import Observation, blend, observation_from_irradiance, satellite_observation
+from custom_components.soular.core.clearsky import apply_clear_sky_index, clear_sky, clear_sky_index, resample_to_grid
 from custom_components.soular.core.geometry import solar_geometry
 from custom_components.soular.core.irradiance import decompose
 from custom_components.soular.core.pipeline import SystemSpec, WeatherSeries, forecast
@@ -60,6 +61,14 @@ if TYPE_CHECKING:  # pragma: no cover
 
 STEP_SECONDS = 300
 HORIZON_HOURS = 48
+
+# The satellite archive publishes in arrears. At issue time the freshest
+# observation available is roughly this old, and pretending otherwise would let
+# the nowcast see cloud that had not been reported yet.
+SATELLITE_LATENCY_MINUTES = 30
+# How many recent observations to persist from. More than a couple adds little:
+# they are ten minutes apart and highly correlated.
+SATELLITE_OBSERVATION_COUNT = 3
 
 # The MPPT channels were re-plugged when an EV charger went in. Days either side
 # of the changeover are dropped rather than guessed at, since the exact hour is
@@ -283,6 +292,8 @@ class Variant:
     # Use the hard-horizon files instead of the graded transmittance grids, so
     # the value of grading can be separated from the value of shading at all.
     hard_horizon: bool = False
+    # Blend recent satellite observations into the forecast by persistence.
+    nowcast: bool = False
 
 
 VARIANTS: tuple[Variant, ...] = (
@@ -295,6 +306,7 @@ VARIANTS: tuple[Variant, ...] = (
     Variant("no-perez-observed", "isotropic sky, satellite irradiance", "observed", transposition="isotropic"),
     Variant("hard-horizon", "Soular optics with a hard horizon", "forecast", hard_horizon=True),
     Variant("hard-horizon-observed", "hard horizon, satellite irradiance", "observed", hard_horizon=True),
+    Variant("nowcast", "forecast irradiance plus a satellite nowcast", "forecast", nowcast=True),
 )
 
 
@@ -378,6 +390,8 @@ def weather_for(
     grid: TimeGrid,
     issue: np.datetime64,
     driver: str,
+    *,
+    nowcast: bool = False,
 ) -> WeatherSeries | None:
     """Assemble the weather a variant sees, respecting lead time."""
     geometry = solar_geometry(grid.times, site.spec)
@@ -418,6 +432,9 @@ def weather_for(
             direct = np.full(grid.times.size, np.nan)
             diffuse = np.full(grid.times.size, np.nan)
 
+    if nowcast:
+        ghi = _apply_nowcast(archive, site, grid, issue, ghi, clearsky.ghi)
+
     if not np.isfinite(ghi).any():
         return None
     ghi = np.nan_to_num(ghi, nan=0.0)
@@ -434,6 +451,50 @@ def weather_for(
         dni, dhi = decompose(grid.times, ghi, geometry)
 
     return WeatherSeries(ghi=ghi, dni=dni, dhi=dhi, temp_air=temp, wind_speed_10m=wind)
+
+
+def _apply_nowcast(
+    archive: Archive,
+    site: Site,
+    grid: TimeGrid,
+    issue: np.datetime64,
+    forecast_ghi: FloatArray,
+    clearsky_ghi: FloatArray,
+) -> FloatArray:
+    """Blend satellite observations available at the issue time into the forecast.
+
+    Only observations at or before ``issue - latency`` are eligible. The archive
+    holds the whole record, so without that cutoff the nowcast would be reading
+    cloud that had not been published yet -- the single easiest way to
+    manufacture skill that does not exist.
+    """
+    cutoff = issue - np.timedelta64(SATELLITE_LATENCY_MINUTES * 60, "s")
+    table = archive.satellite.get("shortwave_radiation")
+    if not table:
+        return forecast_ghi
+
+    stamps = np.array(sorted(stamp for stamp in table if stamp <= cutoff), dtype="datetime64[s]")
+    if stamps.size == 0:
+        return forecast_ghi
+    recent = stamps[-SATELLITE_OBSERVATION_COUNT:]
+
+    # Clear sky at the observation instants, so the ratio is well posed there
+    # rather than being borrowed from the forecast grid.
+    geometry = solar_geometry(recent, site.spec)
+    observed_clearsky = clear_sky(recent, site.spec, geometry).ghi
+
+    observations: list[Observation] = []
+    for stamp, clear in zip(recent, observed_clearsky, strict=True):
+        k = observation_from_irradiance(stamp, table[stamp], float(clear))
+        if k is not None:
+            observations.append(satellite_observation(stamp, k))
+
+    if not observations:
+        return forecast_ghi
+
+    forecast_k = clear_sky_index(forecast_ghi, clearsky_ghi)
+    blended_k, _ = blend(grid.times, np.nan_to_num(forecast_k, nan=1.0), observations)
+    return apply_clear_sky_index(blended_k, clearsky_ghi)
 
 
 def _ambient(archive: Archive, grid: TimeGrid, leads: FloatArray, variable: str, default: float) -> FloatArray:
@@ -517,8 +578,19 @@ def is_fit_day(local_day: int) -> bool:
     return (local_day % 100 + local_day // 100 % 100) % FIT_DAY_MODULUS == 0
 
 
+# Night samples are perfectly predicted by every variant, so including them in a
+# lead-time bucket dilutes any real difference toward nothing. A nowcast that
+# changes daylight irradiance by 10% can look like it changed nothing at all.
+DAYLIGHT_POWER_W = 1000.0
+
+# Fine near the issue, coarse beyond. A nowcast built on persistence only acts
+# for a couple of hours, so a 0-6h bucket buries its effect under four hours of
+# samples it never touched -- which is exactly how a real 27% improvement in
+# short-lead irradiance first measured as 0.1%.
 LEAD_BUCKETS: tuple[tuple[str, float, float], ...] = (
-    ("0-6h", 0.0, 6.0),
+    ("0-1h", 0.0, 1.0),
+    ("1-2h", 1.0, 2.0),
+    ("2-6h", 2.0, 6.0),
     ("6-24h", 6.0, 24.0),
     ("24-48h", 24.0, 48.0),
 )
@@ -535,6 +607,9 @@ class VariantScore:
     site: Accumulator
     per_array: dict[str, Accumulator]
     per_lead: dict[str, Accumulator]
+    # The same buckets, restricted to samples where the site was actually
+    # generating. This is where a near-term intervention has to show up.
+    per_lead_daylight: dict[str, Accumulator]
     # Keyed on (issue time, local day as yyyymmdd) so a day-ahead forecast can be
     # selected afterwards rather than whichever issue happened to write last.
     daily_predicted: dict[tuple[np.datetime64, int], float]
@@ -548,6 +623,7 @@ class VariantScore:
             site=Accumulator(),
             per_array={name: Accumulator() for name in array_names},
             per_lead={label: Accumulator() for label, _, _ in LEAD_BUCKETS},
+            per_lead_daylight={label: Accumulator() for label, _, _ in LEAD_BUCKETS},
             daily_predicted={},
         )
 
@@ -598,7 +674,7 @@ def run(
         local_days = to_local_dates(times, timezone)
 
         for variant in variants:
-            weather = weather_for(archive, site, grid, issue, variant.driver)
+            weather = weather_for(archive, site, grid, issue, variant.driver, nowcast=variant.nowcast)
             if weather is None:
                 continue
 
@@ -621,10 +697,14 @@ def run(
                     score.fit_per_array[name].add(predicted_dc, actual_dc)
             else:
                 score.site.add(predicted_site, actual_site)
+                generating = np.nan_to_num(actual_site, nan=0.0) > DAYLIGHT_POWER_W
                 for label, low, high in LEAD_BUCKETS:
                     window = usable & (lead_hours >= low) & (lead_hours < high)
                     if window.any():
                         score.per_lead[label].add(predicted_site[window], actual_site[window])
+                    lit = window & generating
+                    if lit.any():
+                        score.per_lead_daylight[label].add(predicted_site[lit], actual_site[lit])
                 for name, predicted_dc in per_array_dc.items():
                     actual_dc = np.where(usable, actuals.dc_by_array[name][np.clip(rows, 0, None)], np.nan)
                     score.per_array[name].add(predicted_dc, actual_dc)
@@ -773,6 +853,25 @@ def report(
 
     lines += [
         "",
+        f"## Site AC power by lead time, generating hours only (RMSE, W, above {DAYLIGHT_POWER_W:,.0f} W)",
+        "",
+        "| variant | " + " | ".join(label for label, _, _ in LEAD_BUCKETS) + " | n (0-6h) |",
+        "|---|" + "---:|" * (len(LEAD_BUCKETS) + 1),
+    ]
+    for variant in variants:
+        score = scores[variant.name]
+        if not score.site.n:
+            continue
+        gain = gains[variant.name]
+        cells = " | ".join(
+            f"{score.per_lead_daylight[label].rmse(gain):,.0f}" if score.per_lead_daylight[label].n else "-"
+            for label, _, _ in LEAD_BUCKETS
+        )
+        first = score.per_lead_daylight[LEAD_BUCKETS[0][0]].n
+        lines.append(f"| {variant.name} | {cells} | {first:,} |")
+
+    lines += [
+        "",
         "## Per-array DC power (RMSE as a fraction of array capacity)",
         "",
         "| variant | " + " | ".join(names) + " |",
@@ -800,6 +899,7 @@ def report(
         ("forecast", "no-shading", "hard-horizon", "a hard horizon, vs no shading at all"),
         ("forecast", "hard-horizon", "soular", "grading the shading, vs a hard horizon"),
         ("observed", "hard-horizon-observed", "soular-observed", "grading the shading, weather removed"),
+        ("forecast", "soular", "nowcast", "a satellite nowcast, on top of everything"),
     ):
         if base not in scores or comparison not in scores:
             continue
@@ -810,6 +910,19 @@ def report(
         after_rmse = after.site.rmse(gains[comparison])
         delta = 1.0 - after_rmse / before_rmse
         lines.append(f"- **{what}** ({driver} driver): RMSE {before_rmse:,.0f} W -> {after_rmse:,.0f} W, {delta:+.1%}")
+
+    if "nowcast" in scores and "soular" in scores:
+        lines += ["", "Nowcast effect by lead time, generating hours only:", ""]
+        for label, _, _ in LEAD_BUCKETS:
+            before = scores["soular"].per_lead_daylight[label]
+            after = scores["nowcast"].per_lead_daylight[label]
+            if before.n and after.n:
+                before_rmse = before.rmse(gains["soular"])
+                after_rmse = after.rmse(gains["nowcast"])
+                lines.append(
+                    f"- {label}: {before_rmse:,.0f} W -> {after_rmse:,.0f} W, "
+                    f"{1.0 - after_rmse / before_rmse:+.1%} (n={after.n:,})"
+                )
 
     if "no-shading-observed" in scores and "soular-observed" in scores:
         lines += ["", "Per-array shading benefit, weather removed:", ""]
