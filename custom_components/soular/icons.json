@@ -16,11 +16,26 @@
       "energy_production_today": {
         "default": "mdi:solar-power-variant"
       },
+      "energy_production_today_p10": {
+        "default": "mdi:chevron-down-box-outline"
+      },
+      "energy_production_today_p90": {
+        "default": "mdi:chevron-up-box-outline"
+      },
       "energy_production_today_remaining": {
         "default": "mdi:solar-power-variant-outline"
       },
       "energy_production_tomorrow": {
         "default": "mdi:solar-power-variant"
+      },
+      "energy_production_tomorrow_p10": {
+        "default": "mdi:chevron-down-box-outline"
+      },
+      "energy_production_tomorrow_p90": {
+        "default": "mdi:chevron-up-box-outline"
+      },
+      "last_update_ensemble": {
+        "default": "mdi:chart-bell-curve"
       },
       "last_update_forecast": {
         "default": "mdi:cloud-download-outline"
@@ -45,6 +60,12 @@
       },
       "power_production_now": {
         "default": "mdi:solar-power"
+      },
+      "power_production_now_p10": {
+        "default": "mdi:chevron-down-box-outline"
+      },
+      "power_production_now_p90": {
+        "default": "mdi:chevron-up-box-outline"
       },
       "shading_transmittance": {
         "default": "mdi:tree-outline"

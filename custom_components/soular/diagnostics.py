@@ -77,6 +77,20 @@ async def async_get_config_entry_diagnostics(
             if coordinator.weather_fetched_at
             else None,
             "weather_error": coordinator.weather_error,
+            # Whether each optional source was working. A forecast that looks
+            # wrong is usually one of these being quietly absent, and the answer
+            # should be in the report rather than in a log the reporter no longer
+            # has.
+            "satellite_fetched_at": coordinator.satellite_fetched_at.isoformat()
+            if coordinator.satellite_fetched_at
+            else None,
+            "satellite_error": coordinator.satellite_error,
+            "observed_share": round(coordinator.observed_share, 3),
+            "ensemble_fetched_at": coordinator.ensemble_fetched_at.isoformat()
+            if coordinator.ensemble_fetched_at
+            else None,
+            "ensemble_error": coordinator.ensemble_error,
+            "uncertainty_available": coordinator.uncertainty_available,
         }
         result = coordinator.data
         if coordinator.last_update_success:
@@ -92,6 +106,10 @@ async def async_get_config_entry_diagnostics(
                         "transmittance": _summary(entry_result.transmittance),
                     }
                     for entry_result in result.arrays
+                },
+                "energy_quantiles_kwh": {
+                    day: {str(level): round(value, 2) for level, value in levels.items()}
+                    for day, levels in coordinator.quantile_energy.items()
                 },
             }
 

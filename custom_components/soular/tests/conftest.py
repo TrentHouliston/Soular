@@ -22,6 +22,7 @@ from custom_components.soular.const import (
     DOMAIN,
     SUBENTRY_TYPE_ARRAY,
 )
+from custom_components.soular.sources.ensemble import EnsembleError, EnsembleForecast
 from custom_components.soular.sources.open_meteo import HourlyWeather
 from custom_components.soular.sources.satellite import SatelliteError, SatelliteObservations
 
@@ -89,11 +90,30 @@ def synthetic_satellite(hours: int = 3) -> SatelliteObservations:
     return SatelliteObservations(times=times, ghi=700.0 * daylight)
 
 
+def synthetic_ensemble(members: int = 21, hours: int = 96) -> EnsembleForecast:
+    """Build a three-hourly ensemble spanning the forecast, with correlated members.
+
+    Each member carries a persistent bias rather than independent noise, because
+    that is what makes a day's energy uncertain: real ensembles disagree about
+    whether it will be cloudy, not about individual hours.
+    """
+    start = np.datetime64(int(dt_util.utcnow().timestamp()) // 3600 * 3600, "s")
+    times = np.arange(start, start + np.timedelta64(hours * 3600, "s"), np.timedelta64(3 * 3600, "s")).astype(
+        "datetime64[s]"
+    )
+    hour_of_day = (times.astype("datetime64[s]").astype(np.int64) / 3600.0) % 24
+    daylight = np.clip(np.cos((hour_of_day - 2) / 24.0 * 2 * np.pi), 0.0, None)
+    rng = np.random.default_rng(11)
+    bias = rng.normal(1.0, 0.18, members)[:, None]
+    return EnsembleForecast(times=times, members=np.clip(850.0 * daylight[None, :] * bias, 0.0, None))
+
+
 @pytest.fixture
 def mock_weather() -> Generator[Any]:
     """Serve synthetic weather and satellite data instead of calling the network."""
     weather = synthetic_weather()
     observations = synthetic_satellite()
+    ensemble = synthetic_ensemble()
 
     async def _fetch(*_args: Any, **_kwargs: Any) -> HourlyWeather:
         return weather
@@ -101,11 +121,18 @@ def mock_weather() -> Generator[Any]:
     async def _fetch_satellite(*_args: Any, **_kwargs: Any) -> SatelliteObservations:
         return observations
 
+    async def _fetch_ensemble(*_args: Any, **_kwargs: Any) -> EnsembleForecast:
+        return ensemble
+
     with (
         patch("custom_components.soular.coordinator.coordinator.fetch", side_effect=_fetch) as mocked,
         patch(
             "custom_components.soular.coordinator.coordinator.satellite_source.fetch",
             side_effect=_fetch_satellite,
+        ),
+        patch(
+            "custom_components.soular.coordinator.coordinator.ensemble_source.fetch",
+            side_effect=_fetch_ensemble,
         ),
     ):
         yield mocked
@@ -123,9 +150,14 @@ def no_satellite() -> Generator[Any]:
         message = "satellite unavailable"
         raise SatelliteError(message)
 
+    async def _no_ensemble(*_args: Any, **_kwargs: Any) -> EnsembleForecast:
+        message = "ensemble unavailable"
+        raise EnsembleError(message)
+
     with (
         patch("custom_components.soular.coordinator.coordinator.fetch", side_effect=_fetch),
         patch("custom_components.soular.coordinator.coordinator.satellite_source.fetch", side_effect=_fail) as mocked,
+        patch("custom_components.soular.coordinator.coordinator.ensemble_source.fetch", side_effect=_no_ensemble),
     ):
         yield mocked
 

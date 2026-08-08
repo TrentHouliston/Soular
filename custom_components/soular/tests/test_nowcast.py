@@ -83,3 +83,5 @@ async def test_diagnostics_include_the_satellite(hass: HomeAssistant, configured
 
     result = await async_get_config_entry_diagnostics(hass, configured)
     assert result["coordinator"]["last_update_success"] is True
+    assert result["coordinator"]["satellite_error"] is None
+    assert result["coordinator"]["satellite_fetched_at"] is not None

@@ -22,9 +22,35 @@
           "longitude": "Decimal degrees, east positive.",
           "name": "Shown on the site device and used to name its entities."
         }
+      },
+      "reconfigure": {
+        "title": "Site location",
+        "description": "Changing any of these rebuilds the forecast. The site cannot be moved to a different location; remove it and add a new one instead.",
+        "data": {
+          "battery_soc_sensor": "Battery state of charge",
+          "elevation": "Elevation",
+          "ground_type": "Ground surface",
+          "inverter_ac_limit": "Inverter AC limit",
+          "latitude": "Latitude",
+          "longitude": "Longitude",
+          "name": "Name"
+        },
+        "data_description": {
+          "battery_soc_sensor": "Optional. A full battery curtails the array at the sunniest part of the day; telling Soular about it keeps those samples out of the calibration.",
+          "elevation": "Metres above sea level. Only weakly affects the clear-sky model.",
+          "ground_type": "What surrounds the array. Sets the ground reflectance used for the reflected component of plane-of-array irradiance.",
+          "inverter_ac_limit": "Leave empty unless your inverter actually clips. A limit set too low truncates the forecast at the sunniest part of the day.",
+          "latitude": "Decimal degrees, north positive.",
+          "longitude": "Decimal degrees, east positive.",
+          "name": "Shown on the site device and used to name its entities."
+        }
       }
     },
-    "abort": { "already_configured": "A site is already configured at this location." }
+    "abort": {
+      "already_configured": "A site is already configured at this location.",
+      "cannot_move_site": "A site cannot be moved. Remove this one and add a new site at the new location, so the learned correction is not carried over to a different sky.",
+      "reconfigure_successful": "Site updated."
+    }
   },
   "config_subentries": {
     "array": {
@@ -51,7 +77,7 @@
             "name": "Used for this array's device and entity names.",
             "power_sensor": "Optional. This array's actual output, used to calibrate the forecast against reality. Without it the array runs uncalibrated.",
             "shading_file": "Optional. Filename inside your Home Assistant config/soular directory. Accepts a graded transmittance grid (.npz or .csv) or a two-column horizon file (.txt).",
-            "temperature_coefficient": "From the module datasheet, typically around -0.35 %/\u00b0C.",
+            "temperature_coefficient": "From the module datasheet, typically around -0.35 %/°C.",
             "tilt": "Degrees from horizontal. 0 is flat, 90 is vertical."
           }
         },
@@ -75,7 +101,7 @@
             "name": "Used for this array's device and entity names.",
             "power_sensor": "Optional. This array's actual output, used to calibrate the forecast against reality. Without it the array runs uncalibrated.",
             "shading_file": "Optional. Filename inside your Home Assistant config/soular directory. Accepts a graded transmittance grid (.npz or .csv) or a two-column horizon file (.txt).",
-            "temperature_coefficient": "From the module datasheet, typically around -0.35 %/\u00b0C.",
+            "temperature_coefficient": "From the module datasheet, typically around -0.35 %/°C.",
             "tilt": "Degrees from horizontal. 0 is flat, 90 is vertical."
           }
         }
@@ -95,8 +121,13 @@
       "energy_current_hour": { "name": "Estimated energy production - this hour" },
       "energy_next_hour": { "name": "Estimated energy production - next hour" },
       "energy_production_today": { "name": "Estimated energy production - today" },
+      "energy_production_today_p10": { "name": "Estimated energy production - today (P10)" },
+      "energy_production_today_p90": { "name": "Estimated energy production - today (P90)" },
       "energy_production_today_remaining": { "name": "Estimated energy production - remaining today" },
       "energy_production_tomorrow": { "name": "Estimated energy production - tomorrow" },
+      "energy_production_tomorrow_p10": { "name": "Estimated energy production - tomorrow (P10)" },
+      "energy_production_tomorrow_p90": { "name": "Estimated energy production - tomorrow (P90)" },
+      "last_update_ensemble": { "name": "Ensemble last updated" },
       "last_update_forecast": { "name": "Forecast last updated" },
       "last_update_satellite": { "name": "Satellite last updated" },
       "learning_samples": { "name": "Learning samples" },
@@ -105,6 +136,8 @@
       "power_highest_peak_time_today": { "name": "Highest power peak time - today" },
       "power_highest_peak_time_tomorrow": { "name": "Highest power peak time - tomorrow" },
       "power_production_now": { "name": "Estimated power production - now" },
+      "power_production_now_p10": { "name": "Estimated power production - now (P10)" },
+      "power_production_now_p90": { "name": "Estimated power production - now (P90)" },
       "shading_transmittance": { "name": "Shading transmittance" }
     }
   },

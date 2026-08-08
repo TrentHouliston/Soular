@@ -57,6 +57,9 @@ RECOMPUTE_INTERVAL: Final = timedelta(minutes=5)
 # The satellite publishes every ten minutes with about half an hour of latency,
 # so polling faster than its cadence cannot learn anything new.
 SATELLITE_INTERVAL: Final = timedelta(minutes=10)
+# Ensembles run every six hours at best and are three-hourly in output, so
+# hourly polling already outruns anything new they have to say.
+ENSEMBLE_INTERVAL: Final = timedelta(hours=1)
 
 # The learner samples measured output at the recompute cadence. Samples closer
 # together than this are more correlated than informative.

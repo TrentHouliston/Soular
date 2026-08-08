@@ -6,10 +6,16 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from custom_components.soular import SoularConfigEntry
 from custom_components.soular.const import SUBENTRY_TYPE_ARRAY
-from custom_components.soular.entities import ARRAY_DIAGNOSTICS, SENSOR_DESCRIPTIONS, SITE_DIAGNOSTICS
+from custom_components.soular.entities import (
+    ARRAY_DIAGNOSTICS,
+    QUANTILE_DESCRIPTIONS,
+    SENSOR_DESCRIPTIONS,
+    SITE_DIAGNOSTICS,
+)
 from custom_components.soular.entities.sensor import (
     SoularArrayDiagnosticSensor,
     SoularForecastSensor,
+    SoularQuantileSensor,
     SoularSiteDiagnosticSensor,
 )
 from custom_components.soular.system import site_name
@@ -33,6 +39,11 @@ async def async_setup_entry(
     entities: list[SensorEntity] = [
         SoularForecastSensor(coordinator, description, entry, name) for description in SENSOR_DESCRIPTIONS
     ]
+    # Quantiles are site-level only. Per-array ensemble spread would be six more
+    # entities per array describing the same weather.
+    entities.extend(
+        SoularQuantileSensor(coordinator, description, entry, name) for description in QUANTILE_DESCRIPTIONS
+    )
     entities.extend(
         SoularSiteDiagnosticSensor(coordinator, description, entry, name) for description in SITE_DIAGNOSTICS
     )
