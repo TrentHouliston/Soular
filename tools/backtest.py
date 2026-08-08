@@ -271,6 +271,9 @@ class Variant:
     shading: bool = True
     transposition: str = "perez"
     incumbent: bool = False
+    # Use the hard-horizon files instead of the graded transmittance grids, so
+    # the value of grading can be separated from the value of shading at all.
+    hard_horizon: bool = False
 
 
 VARIANTS: tuple[Variant, ...] = (
@@ -281,10 +284,17 @@ VARIANTS: tuple[Variant, ...] = (
     Variant("soular-observed", "Perez + graded shading, satellite irradiance", "observed"),
     Variant("no-shading-observed", "shading disabled, satellite irradiance", "observed", shading=False),
     Variant("no-perez-observed", "isotropic sky, satellite irradiance", "observed", transposition="isotropic"),
+    Variant("hard-horizon", "Soular optics with a hard horizon", "forecast", hard_horizon=True),
+    Variant("hard-horizon-observed", "hard horizon, satellite irradiance", "observed", hard_horizon=True),
 )
 
 
-def build_system(site: Site, shading: dict[str, TransmittanceGrid], variant: Variant) -> SystemSpec:
+def build_system(
+    site: Site,
+    shading: dict[str, TransmittanceGrid],
+    horizons: dict[str, TransmittanceGrid],
+    variant: Variant,
+) -> SystemSpec:
     """Assemble the system spec a variant runs under."""
     spec = SiteSpec(
         latitude=site.spec.latitude,
@@ -293,12 +303,13 @@ def build_system(site: Site, shading: dict[str, TransmittanceGrid], variant: Var
         albedo=INCUMBENT_ALBEDO if variant.incumbent else site.spec.albedo,
         transposition_model="isotropic" if variant.transposition == "isotropic" else "perez",  # type: ignore[arg-type]
     )
-    return SystemSpec(
-        site=spec,
-        arrays=site.arrays,
-        inverters={"default": site.inverter},
-        shading=shading if variant.shading else {},
-    )
+    if not variant.shading:
+        applied: dict[str, TransmittanceGrid] = {}
+    elif variant.hard_horizon:
+        applied = horizons
+    else:
+        applied = shading
+    return SystemSpec(site=spec, arrays=site.arrays, inverters={"default": site.inverter}, shading=applied)
 
 
 def incumbent_forecast(
@@ -588,7 +599,7 @@ def run(
                 predicted_site = incumbent_forecast(site, horizons, grid, weather)
                 per_array_dc: dict[str, FloatArray] = {}
             else:
-                result = forecast(build_system(site, shading, variant), grid, weather)
+                result = forecast(build_system(site, shading, horizons, variant), grid, weather)
                 predicted_site = result.ac_power_w
                 per_array_dc = {entry.name: entry.dc_power_w for entry in result.arrays}
 
@@ -613,7 +624,13 @@ def run(
             # daily counters are local-day totals, and this site is 10-11 hours
             # east of UTC, so binning by UTC day would compare two different days.
             if not fitting:
-                for day in np.unique(local_days):
+                # Only whole local days. The window starts and ends mid-day in
+                # local time, so its first and last days are partial -- scoring
+                # those as whole days reads as a massive under-prediction. Since
+                # the window is contiguous, every other day is fully covered.
+                for day in np.unique(local_days[1:-1]):
+                    if day in (local_days[0], local_days[-1]):
+                        continue
                     window = local_days == day
                     energy = float(np.sum(predicted_site[window]) * STEP_SECONDS / 3.6e6)
                     score.daily_predicted[issue, int(day)] = energy
@@ -636,7 +653,7 @@ def to_local_dates(times: TimeArray, timezone: ZoneInfo) -> NDArray[np.int64]:
     return np.asarray(local.strftime("%Y%m%d"), dtype=np.int64)
 
 
-def daily_mape(score: VariantScore, actuals: Actuals, timezone: ZoneInfo, gain: float) -> float:
+def daily_errors(score: VariantScore, actuals: Actuals, timezone: ZoneInfo, gain: float) -> list[float]:
     """Day-ahead daily energy error, as a mean absolute percentage.
 
     "Day-ahead" is pinned down rather than left to whichever issue wrote last:
@@ -669,7 +686,21 @@ def daily_mape(score: VariantScore, actuals: Actuals, timezone: ZoneInfo, gain: 
         _, predicted = max(eligible, key=lambda pair: pair[0])
         errors.append(abs(predicted * gain - actual) / actual)
 
-    return float(np.mean(errors)) * 100.0 if errors else math.nan
+    return errors
+
+
+def daily_mape(score: VariantScore, actuals: Actuals, timezone: ZoneInfo, gain: float) -> tuple[float, float]:
+    """Mean and median absolute percentage error on day-ahead daily energy.
+
+    Both, because the mean is not robust here. A heavily overcast winter day can
+    produce a couple of kilowatt-hours, and a two-kilowatt-hour miss on it is a
+    100% error that swamps a whole month of good days. The median says what a
+    typical day looks like; the mean says what the tail costs.
+    """
+    errors = daily_errors(score, actuals, timezone, gain)
+    if not errors:
+        return math.nan, math.nan
+    return float(np.mean(errors)) * 100.0, float(np.median(errors)) * 100.0
 
 
 def report(
@@ -698,18 +729,19 @@ def report(
         "",
         "## Site AC power, five-minute samples (holdout days)",
         "",
-        "| variant | gain | RMSE (W) | nRMSE | bias (W) | day-ahead energy MAPE | n |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| variant | gain | RMSE (W) | nRMSE | bias (W) | energy MAPE | energy median APE | n |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for variant in variants:
         score = scores[variant.name]
         if not score.site.n:
             continue
         gain = gains[variant.name]
+        mean_ape, median_ape = daily_mape(score, actuals, timezone, gain)
         lines.append(
             f"| {variant.name} | {gain:.3f} | {score.site.rmse(gain):,.0f} "
             f"| {score.site.rmse(gain) / capacity:.1%} | {score.site.mbe(gain):+,.0f} "
-            f"| {daily_mape(score, actuals, timezone, gain):.1f}% | {score.site.n:,} |"
+            f"| {mean_ape:.1f}% | {median_ape:.1f}% | {score.site.n:,} |"
         )
 
     lines += [
@@ -756,6 +788,9 @@ def report(
         ("forecast", "incumbent", "soular", "everything, vs the incumbent"),
         ("observed", "no-shading-observed", "soular-observed", "graded shading, weather removed"),
         ("observed", "no-perez-observed", "soular-observed", "Perez transposition, weather removed"),
+        ("forecast", "no-shading", "hard-horizon", "a hard horizon, vs no shading at all"),
+        ("forecast", "hard-horizon", "soular", "grading the shading, vs a hard horizon"),
+        ("observed", "hard-horizon-observed", "soular-observed", "grading the shading, weather removed"),
     ):
         if base not in scores or comparison not in scores:
             continue
@@ -839,8 +874,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "bias": scores[variant.name].site.mbe(scores[variant.name].fit_site.gain),
                         "n": scores[variant.name].site.n,
                     },
-                    "daily_mape": daily_mape(
-                        scores[variant.name], actuals, site.timezone, scores[variant.name].fit_site.gain
+                    "daily_energy_ape": dict(
+                        zip(
+                            ("mean", "median"),
+                            daily_mape(
+                                scores[variant.name], actuals, site.timezone, scores[variant.name].fit_site.gain
+                            ),
+                            strict=True,
+                        )
                     ),
                     "per_array": {
                         name: scores[variant.name].per_array[name].rmse(scores[variant.name].fit_per_array[name].gain)
