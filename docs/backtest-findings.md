@@ -13,8 +13,9 @@ scored against modelled AC.
 ## The short version
 
 1. **Shading is the whole story.** Adding shading of any kind cuts site RMSE by
-    12–15% against no shading, and by 23% once weather error is removed from the
-    comparison. Per array it is 19–27%.
+    12–14% against no shading, and by 24% once weather error is removed from the
+    comparison. Per array it is 19–27%. It roughly halves the typical day's
+    energy error.
 2. **Perez transposition does not measurably help at this roof pitch.** It is
     still the right default, for reasons below.
 3. **The graded transmittance map currently loses to the hard horizon**, which
@@ -57,10 +58,10 @@ grid over the hard horizon files, on the grounds that a porous canopy shades
 partially and a step function cannot express that. The replay finds the opposite,
 consistently and on both drivers:
 
-- With forecast irradiance: hard horizon 2,163 W RMSE, graded grid 2,225 W —
-    grading is **2.9% worse**.
-- With observed irradiance: hard horizon 1,585 W, graded grid 1,680 W — grading
-    is **6.0% worse**.
+- With forecast irradiance: hard horizon 2,155 W RMSE, graded grid 2,204 W —
+    grading is **2.3% worse**.
+- With observed irradiance: hard horizon 1,546 W, graded grid 1,624 W — grading
+    is **5.0% worse**.
 - Per array, weather removed, the hard horizon matches or beats the graded grid
     on all four.
 
@@ -89,6 +90,30 @@ Renormalising does not fix it. The 98th percentile of transmittance along the su
 track is already 0.99–1.00 for every array, so the field does reach unity at its
 brightest — the attenuation is spread across direction, not applied as a scale.
 Position-dependent error is exactly what a scalar cannot absorb.
+
+### It is not curtailment, and it is not clipping
+
+Curtailment is the obvious confound: a full battery suppresses measured output,
+which no forecast can predict. Sweeping the state-of-charge exclusion threshold
+barely moves the result:
+
+| exclusion threshold      | samples excluded | graded vs hard |
+| ------------------------ | ---------------: | -------------: |
+| SOC ≥ 100% (i.e. barely) |            5,784 |          −4.8% |
+| SOC ≥ 97% (as shipped)   |            8,066 |          −5.0% |
+| SOC ≥ 90%                |           11,485 |          −4.9% |
+| SOC ≥ 80%                |           15,195 |          −4.8% |
+
+Flat while the excluded count nearly triples. The direction argues against it
+too: curtailment favours whichever variant predicts *less*, which is the graded
+grid, so leakage would have been hiding a slightly larger gap rather than
+inventing one.
+
+Clipping was a genuine error, now fixed. An earlier run assumed a 20 kW inverter
+limit. This site reaches **25.8 kW** and the distribution above 18 kW decays
+smoothly with no pileup at any value, so nothing clips. A limit set too low
+truncates predictions, and truncates hardest the variants that predict most,
+which quietly rigs an ablation. The harness now defaults to no binding limit.
 
 ### What probably causes it
 
@@ -129,35 +154,35 @@ using for each day the forecast issued most recently before that day began:
 
 | variant                             | median APE | mean APE |
 | ----------------------------------- | ---------: | -------: |
-| no shading                          |      35.3% |    47.2% |
-| graded shading                      |      20.8% |    42.2% |
-| hard horizon                        |      21.1% |    40.7% |
-| incumbent emulation                 |      21.2% |    41.3% |
-| graded shading, observed irradiance |      17.7% |    36.7% |
-| hard horizon, observed irradiance   |      13.1% |    33.5% |
+| no shading                          |      31.3% |    45.9% |
+| graded shading                      |      20.2% |    40.7% |
+| hard horizon                        |      20.8% |    39.6% |
+| incumbent emulation                 |      21.2% |    41.5% |
+| graded shading, observed irradiance |      11.9% |    33.9% |
+| hard horizon, observed irradiance   |      10.2% |    31.5% |
 
-Shading cuts the typical day's energy error roughly in half, 35% to 21%. The
+Shading cuts the typical day's energy error by a third, 31% to 20%. The
 mean stays high everywhere because a two kilowatt-hour miss on a dark winter day
 is a 100% error; the median is the number that describes a normal day.
 
 For scale, the original analysis reported site daily energy error of 19.4%
-falling to 15.4% with shading, on clear days only. The 13.1% median here is
-across all weather with observed irradiance, which is consistent.
+falling to 15.4% with shading, on clear days only. The 10.2% median here is
+across all weather with observed irradiance, which is comfortably consistent.
 
 ## Where the remaining error is
 
 | driver                      | site RMSE | as % of capacity |
 | --------------------------- | --------: | ---------------: |
-| forecast irradiance, shaded |   2,163 W |             7.9% |
-| observed irradiance, shaded |   1,585 W |             5.8% |
+| forecast irradiance, shaded |   2,155 W |             7.9% |
+| observed irradiance, shaded |   1,546 W |             5.7% |
 
-Replacing forecast irradiance with satellite observation removes about 27% of the
+Replacing forecast irradiance with satellite observation removes about 28% of the
 RMSE. That is the ceiling on what better weather input can buy, and it is far
 larger than anything left in the optics. It is the reason the next phases are
 satellite nowcasting, ensemble spread and online bias correction rather than more
 physics.
 
-The residual 5.8% under observed irradiance is the floor set by everything else:
+The residual 5.7% under observed irradiance is the floor set by everything else:
 sub-pixel cloud, the 10-minute satellite cadence against five-minute production,
 module-level effects the model does not represent, and the shading map's own
 ±25% absolute accuracy.

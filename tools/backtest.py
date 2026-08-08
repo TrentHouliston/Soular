@@ -71,8 +71,10 @@ CHANNELS_BEFORE = {"PV1_POWER": "east", "PV2_POWER": "west", "PV3_POWER": "north
 CHANNELS_AFTER = {"PV1_POWER": "west", "PV2_POWER": "east", "PV3_POWER": "north", "PV4_POWER": "south"}
 
 # Battery-full curtailment and export limiting are real lost production that no
-# forecast can predict. Scored separately rather than silently included.
-CURTAILMENT_SOC_PCT = 97.0
+# forecast can predict, so those samples are excluded from scoring. The threshold
+# is an option because a conclusion that moves when you change it is a conclusion
+# about the mask, not about the model.
+DEFAULT_CURTAILMENT_SOC_PCT = 97.0
 
 # A hard horizon is lit or not; the incumbent has no notion of partial.
 HORIZON_LIT_THRESHOLD = 0.5
@@ -131,10 +133,11 @@ class Actuals:
     soc_pct: FloatArray
     valid: np.ndarray
     daily_ac_kwh: dict[dt.date, float]
+    curtailment_soc_pct: float = DEFAULT_CURTAILMENT_SOC_PCT
 
     def curtailed(self) -> np.ndarray:
         """Flag samples where the battery was full enough to curtail production."""
-        return self.soc_pct >= CURTAILMENT_SOC_PCT
+        return self.soc_pct >= self.curtailment_soc_pct
 
 
 def uniform_grid(start: dt.date, end: dt.date) -> TimeArray:
@@ -144,7 +147,12 @@ def uniform_grid(start: dt.date, end: dt.date) -> TimeArray:
     return np.arange(first, last, np.timedelta64(STEP_SECONDS, "s")).astype("datetime64[s]")
 
 
-def load_actuals(db_path: Path, times: TimeArray, array_names: Sequence[str]) -> Actuals:
+def load_actuals(
+    db_path: Path,
+    times: TimeArray,
+    array_names: Sequence[str],
+    curtailment_soc_pct: float = DEFAULT_CURTAILMENT_SOC_PCT,
+) -> Actuals:
     """Load measured DC strings and AC output onto ``times``.
 
     The database stores kilowatts; everything downstream is watts.
@@ -200,6 +208,7 @@ def load_actuals(db_path: Path, times: TimeArray, array_names: Sequence[str]) ->
         soc_pct=soc,
         valid=valid,
         daily_ac_kwh=daily,
+        curtailment_soc_pct=curtailment_soc_pct,
     )
 
 
@@ -826,7 +835,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--start", type=dt.date.fromisoformat, required=True)
     parser.add_argument("--end", type=dt.date.fromisoformat, required=True)
     parser.add_argument("--issue-every", type=int, default=6, help="hours between forecast issue times")
-    parser.add_argument("--ac-limit-w", type=float, default=20000.0)
+    # No AC clipping is visible anywhere in this site's record -- output reaches
+    # 25.8 kW and the distribution decays smoothly with no pileup -- so the
+    # default has to sit above anything observed. A limit set too low silently
+    # truncates predictions, and truncates the variants that predict most the
+    # hardest, which quietly rigs an ablation.
+    parser.add_argument("--ac-limit-w", type=float, default=100000.0)
+    parser.add_argument(
+        "--curtailment-soc",
+        type=float,
+        default=DEFAULT_CURTAILMENT_SOC_PCT,
+        help="exclude samples at or above this battery state of charge",
+    )
+    parser.add_argument("--variants", help="comma-separated subset of variant names to run")
     parser.add_argument("--out", type=Path, default=Path("backtest_out/report.md"))
     args = parser.parse_args(argv)
 
@@ -849,13 +870,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Horizons (for the incumbent baseline): {', '.join(horizons) or 'none'}")
 
     times = uniform_grid(args.start, args.end)
-    actuals = load_actuals(args.db, times, names)
-    print(f"Actuals: {int(actuals.valid.sum()):,} usable of {times.size:,} five-minute samples")
+    actuals = load_actuals(args.db, times, names, curtailment_soc_pct=args.curtailment_soc)
+    excluded = int((actuals.valid & actuals.curtailed()).sum())
+    print(
+        f"Actuals: {int(actuals.valid.sum()):,} usable of {times.size:,} five-minute samples; "
+        f"{excluded:,} further excluded as curtailed (SOC >= {args.curtailment_soc:.0f}%)"
+    )
 
     archive = Archive(args.cache)
     print(f"Archive: NWP leads {archive.leads}, satellite {'present' if archive.satellite else 'absent'}")
 
     variants = [v for v in VARIANTS if v.driver == "forecast" or archive.satellite]
+    if args.variants:
+        wanted = {name.strip() for name in args.variants.split(",") if name.strip()}
+        unknown = wanted - {v.name for v in VARIANTS}
+        if unknown:
+            parser.error(f"unknown variants: {sorted(unknown)}")
+        variants = [v for v in variants if v.name in wanted]
     print(f"Replaying {len(variants)} variants from {args.start} to {args.end}")
     scores = run(
         site, shading, horizons, archive, actuals, variants, args.start, args.end, args.issue_every, site.timezone
