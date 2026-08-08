@@ -299,7 +299,10 @@ jobs:
     runs-on: ubuntu-latest
     # HACS publish requirements (issues enabled, repo topics, etc.) only apply
     # to the canonical integration repo. Skip on forks so they don't show red.
-    if: github.repository == 'TrentHouliston/soular'
+    # Matched case-insensitively: GitHub redirects repository URLs regardless of
+    # case, so a mismatch here would not break a single link -- it would just
+    # skip this job forever, and 'skipped' is a pass to the aggregator below.
+    if: ${{ github.repository == 'TrentHouliston/soular' || github.repository == 'TrentHouliston/Soular' }}
     steps:
       - name: Run HACS validation
         uses: hacs/action@d556e736723344f83838d08488c983a15381059a # 22.5.0
