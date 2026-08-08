@@ -48,8 +48,13 @@ import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
 
-from custom_components.soular.core.blend import Observation, blend, observation_from_irradiance, satellite_observation
-from custom_components.soular.core.clearsky import apply_clear_sky_index, clear_sky, clear_sky_index, resample_to_grid
+from custom_components.soular.core.blend import (
+    Observation,
+    apply_to_weather,
+    observation_from_irradiance,
+    satellite_observation,
+)
+from custom_components.soular.core.clearsky import clear_sky, resample_to_grid
 from custom_components.soular.core.geometry import solar_geometry
 from custom_components.soular.core.irradiance import decompose
 from custom_components.soular.core.pipeline import SystemSpec, WeatherSeries, forecast
@@ -432,9 +437,6 @@ def weather_for(
             direct = np.full(grid.times.size, np.nan)
             diffuse = np.full(grid.times.size, np.nan)
 
-    if nowcast:
-        ghi = _apply_nowcast(archive, site, grid, issue, ghi, clearsky.ghi)
-
     if not np.isfinite(ghi).any():
         return None
     ghi = np.nan_to_num(ghi, nan=0.0)
@@ -450,18 +452,16 @@ def weather_for(
     else:
         dni, dhi = decompose(grid.times, ghi, geometry)
 
-    return WeatherSeries(ghi=ghi, dni=dni, dhi=dhi, temp_air=temp, wind_speed_10m=wind)
+    series = WeatherSeries(ghi=ghi, dni=dni, dhi=dhi, temp_air=temp, wind_speed_10m=wind)
+    if nowcast:
+        observations = _satellite_observations(archive, site, issue)
+        if observations:
+            series, _ = apply_to_weather(series, grid.times, clearsky.ghi, geometry, observations)
+    return series
 
 
-def _apply_nowcast(
-    archive: Archive,
-    site: Site,
-    grid: TimeGrid,
-    issue: np.datetime64,
-    forecast_ghi: FloatArray,
-    clearsky_ghi: FloatArray,
-) -> FloatArray:
-    """Blend satellite observations available at the issue time into the forecast.
+def _satellite_observations(archive: Archive, site: Site, issue: np.datetime64) -> list[Observation]:
+    """Satellite observations that had actually been published at the issue time.
 
     Only observations at or before ``issue - latency`` are eligible. The archive
     holds the whole record, so without that cutoff the nowcast would be reading
@@ -471,11 +471,11 @@ def _apply_nowcast(
     cutoff = issue - np.timedelta64(SATELLITE_LATENCY_MINUTES * 60, "s")
     table = archive.satellite.get("shortwave_radiation")
     if not table:
-        return forecast_ghi
+        return []
 
     stamps = np.array(sorted(stamp for stamp in table if stamp <= cutoff), dtype="datetime64[s]")
     if stamps.size == 0:
-        return forecast_ghi
+        return []
     recent = stamps[-SATELLITE_OBSERVATION_COUNT:]
 
     # Clear sky at the observation instants, so the ratio is well posed there
@@ -488,13 +488,7 @@ def _apply_nowcast(
         k = observation_from_irradiance(stamp, table[stamp], float(clear))
         if k is not None:
             observations.append(satellite_observation(stamp, k))
-
-    if not observations:
-        return forecast_ghi
-
-    forecast_k = clear_sky_index(forecast_ghi, clearsky_ghi)
-    blended_k, _ = blend(grid.times, np.nan_to_num(forecast_k, nan=1.0), observations)
-    return apply_clear_sky_index(blended_k, clearsky_ghi)
+    return observations
 
 
 def _ambient(archive: Archive, grid: TimeGrid, leads: FloatArray, variable: str, default: float) -> FloatArray:

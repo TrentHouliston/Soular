@@ -40,8 +40,10 @@ import math
 
 import numpy as np
 
-from custom_components.soular.core.clearsky import K_MAX, K_MIN
-from custom_components.soular.core.types import FloatArray, TimeArray
+from custom_components.soular.core.clearsky import K_MAX, K_MIN, apply_clear_sky_index, clear_sky_index
+from custom_components.soular.core.irradiance import decompose
+from custom_components.soular.core.pipeline import WeatherSeries
+from custom_components.soular.core.types import FloatArray, SolarGeometry, TimeArray
 
 # Error variance of the deterministic weather model's clear-sky index, from the
 # measurement above. Deliberately not lead-dependent: it barely moves between one
@@ -189,3 +191,68 @@ def invert_power_to_index(
     if modelled_power_w < min_modelled_w or transmittance < min_transmittance:
         return None
     return float(np.clip(measured_power_w / modelled_power_w, K_MIN, K_MAX))
+
+
+# Below this the beam is spread over so much atmosphere that dividing by its
+# cosine amplifies noise faster than it recovers signal.
+MIN_COS_ZENITH = 0.05
+
+
+def apply_to_weather(
+    series: WeatherSeries,
+    times: TimeArray,
+    clearsky_ghi: FloatArray,
+    geometry: SolarGeometry,
+    observations: list[Observation],
+) -> tuple[WeatherSeries, FloatArray]:
+    """Blend observations into a weather series, keeping its components consistent.
+
+    Shared by the integration and the offline backtest, because the failure this
+    prevents is subtle and was found the hard way. Blending only the total while
+    leaving the forecast's own beam and diffuse untouched leaves the three
+    mutually contradictory -- and since plane-of-array irradiance is built from
+    beam and diffuse, with the total feeding only the small ground-reflected
+    term, an observation blended into the total alone barely reaches the power at
+    all. Measured: a 20% improvement in forecast irradiance produced a 0.3%
+    improvement in forecast power.
+
+    The split is handled by moving the diffuse *fraction* toward what the
+    observed cloudiness implies, in proportion to how much the observation
+    contributed. Where the model still dominates, its own split -- which is
+    model-informed and better than a correlation -- is preserved. Where the
+    observation dominates, so does the correlation's answer, because the model's
+    split describes a sky the observation has just contradicted.
+    """
+    forecast_k = np.nan_to_num(clear_sky_index(series.ghi, clearsky_ghi), nan=1.0)
+    blended_k, share = blend(times, forecast_k, observations)
+    blended_ghi = apply_clear_sky_index(blended_k, clearsky_ghi)
+
+    if not observations:
+        return series, share
+
+    _, erbs_dhi = decompose(times, blended_ghi, geometry)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        erbs_fraction = np.where(blended_ghi > 0.0, erbs_dhi / blended_ghi, 1.0)
+
+    if series.dhi is not None and series.dni is not None:
+        forecast_total = np.maximum(series.ghi, 1e-6)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            forecast_fraction = np.clip(np.where(series.ghi > 0.0, series.dhi / forecast_total, 1.0), 0.0, 1.0)
+    else:
+        forecast_fraction = erbs_fraction
+
+    fraction = np.clip((1.0 - share) * forecast_fraction + share * erbs_fraction, 0.0, 1.0)
+    dhi = fraction * blended_ghi
+    cos_zenith = np.clip(np.cos(np.radians(geometry.apparent_zenith)), MIN_COS_ZENITH, None)
+    dni = np.clip((blended_ghi - dhi) / cos_zenith, 0.0, None)
+
+    return (
+        WeatherSeries(
+            ghi=blended_ghi,
+            temp_air=series.temp_air,
+            wind_speed_10m=series.wind_speed_10m,
+            dni=np.asarray(dni, dtype=np.float64),
+            dhi=np.asarray(dhi, dtype=np.float64),
+        ),
+        share,
+    )

@@ -21,8 +21,13 @@ from homeassistant.util import dt as dt_util
 import numpy as np
 
 from custom_components.soular.const import DOMAIN, RECOMPUTE_INTERVAL, SATELLITE_INTERVAL, UPDATE_INTERVAL
-from custom_components.soular.core.blend import Observation, blend, observation_from_irradiance, satellite_observation
-from custom_components.soular.core.clearsky import apply_clear_sky_index, clear_sky, clear_sky_index
+from custom_components.soular.core.blend import (
+    Observation,
+    apply_to_weather,
+    observation_from_irradiance,
+    satellite_observation,
+)
+from custom_components.soular.core.clearsky import clear_sky
 from custom_components.soular.core.geometry import solar_geometry
 from custom_components.soular.core.nwp import weather_from_hourly
 from custom_components.soular.core.pipeline import ForecastResult, SystemSpec, WeatherSeries, build_time_grid, forecast
@@ -163,7 +168,7 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
         return observations
 
     def _nowcast(self, series: WeatherSeries, times: np.ndarray) -> WeatherSeries:
-        """Blend observations into the forecast irradiance, in index space."""
+        """Blend recent observations into the forecast."""
         geometry = solar_geometry(times, self.system.site)
         clearsky = clear_sky(times, self.system.site, geometry).ghi
 
@@ -172,18 +177,9 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
             self.observed_share = 0.0
             return series
 
-        forecast_k = np.nan_to_num(clear_sky_index(series.ghi, clearsky), nan=1.0)
-        blended_k, share = blend(times, forecast_k, observations)
+        blended, share = apply_to_weather(series, times, clearsky, geometry, observations)
         self.observed_share = float(share[0]) if share.size else 0.0
-
-        # The beam/diffuse split has to be re-derived from the blended total,
-        # because the model's own split describes the sky the model predicted,
-        # not the one the satellite saw.
-        return WeatherSeries(
-            ghi=apply_clear_sky_index(blended_k, clearsky),
-            temp_air=series.temp_air,
-            wind_speed_10m=series.wind_speed_10m,
-        )
+        return blended
 
     def _compute(self, weather: HourlyWeather) -> ForecastResult:
         """Run the model. Blocking; called in an executor."""
