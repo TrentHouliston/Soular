@@ -97,7 +97,14 @@ def ac_power(dc_power_w: FloatArray, inverter: InverterSpec) -> FloatArray:
     if inverter.model == "constant":
         return np.asarray(np.clip(dc * inverter.eta_nom, 0.0, inverter.ac_limit_w), dtype=np.float64)
 
-    # pvlib parameterises its inverter by DC input rating rather than AC output.
+    # pvlib parameterises its inverter by DC input rating rather than AC output,
+    # and its efficiency curve is a function of load *fraction*. That cuts both
+    # ways, and both ways end at zero: a rating far below the array drives the
+    # -0.0162*zeta term negative, and a rating far above it drives the
+    # -0.0059/zeta term negative. Either way pvlib floors the result. So
+    # ac_limit_w has to be within about an order of magnitude of the array it
+    # serves -- see system.build_system, which defaults it to the array capacity
+    # rather than to something nominally unlimited.
     pdc0 = inverter.ac_limit_w / inverter.eta_nom
 
     # Cap DC at that rating *before* the curve. pvlib's efficiency polynomial is

@@ -7,6 +7,7 @@
         "data": {
           "elevation": "Elevation",
           "ground_type": "Ground surface",
+          "inverter_ac_limit": "Inverter AC limit",
           "latitude": "Latitude",
           "longitude": "Longitude",
           "name": "Name"
@@ -14,6 +15,7 @@
         "data_description": {
           "elevation": "Metres above sea level. Only weakly affects the clear-sky model.",
           "ground_type": "What surrounds the array. Sets the ground reflectance used for the reflected component of plane-of-array irradiance.",
+          "inverter_ac_limit": "Leave empty unless your inverter actually clips. A limit set too low truncates the forecast at the sunniest part of the day.",
           "latitude": "Decimal degrees, north positive.",
           "longitude": "Decimal degrees, east positive.",
           "name": "Shown on the site device and used to name its entities."
@@ -21,6 +23,79 @@
       }
     },
     "abort": { "already_configured": "A site is already configured at this location." }
+  },
+  "config_subentries": {
+    "array": {
+      "entry_type": "Array",
+      "initiate_flow": { "user": "Add an array", "reconfigure": "Reconfigure array" },
+      "step": {
+        "user": {
+          "title": "Add a solar array",
+          "description": "One array per roof plane. Panels facing different directions, or at different tilts, need separate arrays.",
+          "data": {
+            "azimuth": "Azimuth",
+            "dc_capacity": "DC capacity",
+            "dc_loss": "DC losses",
+            "name": "Name",
+            "shading_file": "Shading file",
+            "temperature_coefficient": "Temperature coefficient",
+            "tilt": "Tilt"
+          },
+          "data_description": {
+            "azimuth": "Compass degrees the panels face: 0 = north, 90 = east, 180 = south, 270 = west.",
+            "dc_capacity": "Total nameplate rating of the panels on this plane.",
+            "dc_loss": "Soiling, wiring, mismatch and connections combined. The default suits most systems.",
+            "name": "Used for this array's device and entity names.",
+            "shading_file": "Optional. Filename inside your Home Assistant config/soular directory. Accepts a graded transmittance grid (.npz or .csv) or a two-column horizon file (.txt).",
+            "temperature_coefficient": "From the module datasheet, typically around -0.35 %/°C.",
+            "tilt": "Degrees from horizontal. 0 is flat, 90 is vertical."
+          }
+        },
+        "reconfigure": {
+          "title": "Reconfigure array",
+          "description": "Changing any of these rebuilds the forecast.",
+          "data": {
+            "azimuth": "Azimuth",
+            "dc_capacity": "DC capacity",
+            "dc_loss": "DC losses",
+            "name": "Name",
+            "shading_file": "Shading file",
+            "temperature_coefficient": "Temperature coefficient",
+            "tilt": "Tilt"
+          },
+          "data_description": {
+            "azimuth": "Compass degrees the panels face: 0 = north, 90 = east, 180 = south, 270 = west.",
+            "dc_capacity": "Total nameplate rating of the panels on this plane.",
+            "dc_loss": "Soiling, wiring, mismatch and connections combined. The default suits most systems.",
+            "name": "Used for this array's device and entity names.",
+            "shading_file": "Optional. Filename inside your Home Assistant config/soular directory. Accepts a graded transmittance grid (.npz or .csv) or a two-column horizon file (.txt).",
+            "temperature_coefficient": "From the module datasheet, typically around -0.35 %/°C.",
+            "tilt": "Degrees from horizontal. 0 is flat, 90 is vertical."
+          }
+        }
+      },
+      "error": {
+        "invalid_shading_file": "That file could not be read as shading data. It should be a transmittance grid (.npz or .csv) containing this array's name, or a two-column horizon file (.txt).",
+        "name_required": "Give the array a name.",
+        "shading_file_not_found": "No such file in your config/soular directory."
+      },
+      "title": "Solar array"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "cell_temperature": { "name": "Cell temperature" },
+      "energy_current_hour": { "name": "Estimated energy production - this hour" },
+      "energy_next_hour": { "name": "Estimated energy production - next hour" },
+      "energy_production_today": { "name": "Estimated energy production - today" },
+      "energy_production_today_remaining": { "name": "Estimated energy production - remaining today" },
+      "energy_production_tomorrow": { "name": "Estimated energy production - tomorrow" },
+      "poa_irradiance": { "name": "Plane-of-array irradiance" },
+      "power_highest_peak_time_today": { "name": "Highest power peak time - today" },
+      "power_highest_peak_time_tomorrow": { "name": "Highest power peak time - tomorrow" },
+      "power_production_now": { "name": "Estimated power production - now" },
+      "shading_transmittance": { "name": "Shading transmittance" }
+    }
   },
   "selector": {
     "ground_type": {

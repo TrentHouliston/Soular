@@ -154,6 +154,12 @@ reportMissingTypeStubs = false
 
 reportPrivateUsage = false
 
+# Home Assistant's entity base classes declare native_value, entity_description
+# and friends as class attributes and expect subclasses to override them with
+# properties. That is the documented idiom across every integration in core, so
+# the warning here is about the framework's shape rather than about this code.
+reportIncompatibleVariableOverride = false
+
 [tool.pytest.ini_options]
 # Physics tests evaluate a year of sub-hourly geometry; haeo's 5s is too tight.
 timeout = 15
