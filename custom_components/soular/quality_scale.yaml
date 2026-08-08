@@ -1,0 +1,191 @@
+version: 1
+integration: soular
+current_tier: silver
+target_tier: gold
+
+bronze:
+  config-flow:
+    status: done
+    comment: Site hub flow plus an array subentry flow in custom_components/soular/flows/
+  config-flow-test-coverage:
+    status: done
+    comment: custom_components/soular/flows/tests/ covers the hub, array and options flows including validation failures
+  runtime-data:
+    status: done
+    comment: async_setup_entry stores SoularRuntimeData on ConfigEntry.runtime_data
+  entity-unique-id:
+    status: done
+    comment: Unique IDs combine the entry or subentry identifier with the sensor key
+  has-entity-name:
+    status: done
+    comment: SoularSensorBase sets _attr_has_entity_name
+  test-before-configure:
+    status: done
+    comment: The array flow parses the shading file in the executor and reports specific errors before accepting it
+  test-before-setup:
+    status: done
+    comment: async_config_entry_first_refresh runs before platforms are forwarded
+  unique-config-entry:
+    status: done
+    comment: The hub flow keys on rounded coordinates and aborts on a duplicate site
+  docs-high-level-description:
+    status: done
+    comment: README states what the integration does and, unusually, what it measurably buys
+  docs-installation-instructions:
+    status: done
+    comment: docs/configuration.md
+  docs-removal-instructions:
+    status: done
+    comment: docs/configuration.md, including what to do with the learner's stored state
+  entity-event-setup:
+    status: exempt
+    comment: Entities are coordinator-driven and subscribe to nothing else
+  brands:
+    status: todo
+    comment: Pending a pull request against home-assistant/brands
+  common-modules:
+    status: done
+    comment: coordinator/, entities/ and sources/ follow the conventional layout
+  dependency-transparency:
+    status: done
+    comment: pvlib and numpy are published wheels built from source on PyPI, and README documents their weight honestly
+  appropriate-polling:
+    status: done
+    comment: Thirty minutes for the weather model, ten for the satellite, one hour for the ensemble -- each matched to how often that source actually changes
+  action-setup:
+    status: exempt
+    comment: The integration registers no actions
+
+silver:
+  integration-owner:
+    status: done
+    comment: codeowners in manifest.json
+  test-coverage:
+    status: done
+    comment: The physics is additionally validated offline against 297 days of measured production by tools/backtest.py
+  entity-unavailable:
+    status: done
+    comment: Forecast sensors go unavailable without a series; quantile sensors report unknown without an ensemble rather than collapsing onto the median
+  log-when-unavailable:
+    status: done
+    comment: Each source logs its own failure once and the diagnostics report names which one it was
+  action-exceptions:
+    status: exempt
+    comment: The integration registers no actions
+  config-entry-unloading:
+    status: done
+    comment: async_unload_entry unloads platforms and flushes the learner's store
+  reauthentication-flow:
+    status: exempt
+    comment: Open-Meteo's free tier needs no credentials
+  docs-configuration-parameters:
+    status: done
+    comment: docs/configuration.md documents every field on both flows
+  docs-installation-parameters:
+    status: done
+    comment: docs/configuration.md
+  parallel-updates:
+    status: done
+    comment: PARALLEL_UPDATES = 0 in sensor.py; the coordinator pushes
+
+gold:
+  devices:
+    status: done
+    comment: The site is a device and each array is its own device via_device the site
+  diagnostics:
+    status: done
+    comment: diagnostics.py reports geometry, source health and a forecast summary, with coordinates redacted
+  discovery:
+    status: exempt
+    comment: A rooftop array cannot be discovered on a network
+  discovery-update-info:
+    status: exempt
+    comment: As above
+  reconfiguration-flow:
+    status: done
+    comment: The options flow reconfigures the site, and each array subentry is separately reconfigurable
+  dynamic-devices:
+    status: exempt
+    comment: Arrays are added by the user, not found
+  stale-devices:
+    status: done
+    comment: Removing an array subentry removes its device, because its entities are registered against the subentry
+  entity-category:
+    status: done
+    comment: Diagnostics carry EntityCategory.DIAGNOSTIC
+  entity-device-class:
+    status: done
+    comment: Power, energy, temperature, irradiance and timestamp classes are set where one exists
+  entity-disabled-by-default:
+    status: done
+    comment: Diagnostics and the hourly energy sensors start disabled; twelve entities per array is already a lot
+  entity-translations:
+    status: done
+    comment: translations/en.json, with a test asserting the mapping is bidirectional
+  exception-translations:
+    status: todo
+    comment: Config flow errors are translated; coordinator failures still raise untranslated UpdateFailed
+  icon-translations:
+    status: done
+    comment: icons.json, with a test asserting every sensor key has one and none is unused
+  repair-issues:
+    status: todo
+    comment: >-
+      Two are designed and not yet built: learning_not_helping, which needs the
+      skill diagnostics, and possible_array_swap, which would detect two arrays
+      of identical geometry whose learned corrections diverge in opposite
+      directions -- the known labelling ambiguity in the shading analysis.
+  docs-examples:
+    status: done
+    comment: docs/configuration.md shows the haeo and Energy dashboard wiring
+  docs-use-cases:
+    status: done
+    comment: README and docs/configuration.md
+  docs-supported-devices:
+    status: exempt
+    comment: The integration models a rooftop array, not a device it talks to
+  docs-supported-functions:
+    status: done
+    comment: docs/configuration.md lists every entity and what it means
+  docs-known-limitations:
+    status: done
+    comment: >-
+      README and docs/vs-open-meteo-solar-forecast.md state the caveats,
+      including that all measured numbers come from a single site
+  docs-troubleshooting:
+    status: done
+    comment: docs/configuration.md
+  docs-data-update:
+    status: done
+    comment: docs/configuration.md documents each source's poll interval and what is lost when it fails
+
+platinum:
+  strict-typing:
+    status: done
+    comment: pyright strict across the whole package, and py.typed is shipped
+  async-dependency:
+    status: todo
+    comment: >-
+      pvlib is synchronous and always will be. It is imported through
+      async_add_import_executor_job and every call into core/ runs in the
+      executor, which is the available mitigation rather than a fix.
+  inject-websession:
+    status: done
+    comment: Every source takes the session from async_get_clientsession
+
+summary:
+  done: 38
+  exempt: 8
+  todo: 4
+
+notes: |
+  The unusual claim this integration makes is that its accuracy is measured
+  rather than asserted, so the evidence is treated as part of the deliverable:
+  tools/backtest.py replays the shipped code path against 297 days of measured
+  five-minute production, and docs/vs-open-meteo-solar-forecast.md reports the
+  comparison including the parts that are unflattering.
+
+  One thing cannot be measured that way. Open-Meteo serves the current ensemble
+  run and answers historical ranges with a correctly shaped response full of
+  nulls, so the P10/P90 band is validated by unit tests on synthetic ensembles
+  and by online coverage rather than by replay.

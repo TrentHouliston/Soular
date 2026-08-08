@@ -31,6 +31,14 @@ Soular does its own Perez transposition, applies a measured graded transmittance
 satellite observations and your own array into the near-term forecast, produces P10/P50/P90
 from NWP ensembles, and continuously bias-corrects against your measured output.
 
+The uncertainty band is the one claim here that is not backtested, and it cannot be:
+Open-Meteo serves the current ensemble run and answers historical ranges with a correctly
+shaped response full of nulls. It is validated by unit tests on synthetic ensembles and by
+online coverage instead. What that band is careful about is that a day's P90 energy is not
+the integral of the pointwise P90 power -- that reading assumes every hour of the day hits
+its ninetieth percentile at once, and is wrong by roughly a factor of two on band width
+while looking entirely plausible.
+
 Every one of those claims is checked by an offline harness (`tools/backtest.py`) that replays
 the model against measured production, at honest lead times, with each variant separately
 re-scaled so an ablation measures skill rather than bias.
@@ -46,11 +54,22 @@ and caveats in [docs/vs-open-meteo-solar-forecast.md](docs/vs-open-meteo-solar-f
 
 ## Status
 
-Early development. See `docs/` for the design and the measured skill numbers.
+Everything described above is built and tested. It has not yet been through a
+tagged release or a HACS submission, and every measured number on this page comes
+from one site.
+
+Known gaps, listed because they are the ones a user would notice: the learner
+starts cold rather than warm-starting from the recorder, so a fresh install
+spends about a week reaching its calibration; there are no skill diagnostics
+reporting the forecast's own error against a baseline; and the two designed
+repair issues -- a learning-not-helping warning and a swapped-shading-file
+detector -- are specified in `quality_scale.yaml` and not implemented.
 
 ## Installation
 
-Not yet released. Once tagged, install through HACS as a custom repository.
+Add `https://github.com/TrentHouliston/soular` to HACS as a custom repository,
+restart, then add the integration. Full setup, entity list, wiring and
+troubleshooting are in [docs/configuration.md](docs/configuration.md).
 
 ### A note on size
 

@@ -106,3 +106,26 @@ class HubConfigFlow(ConfigFlow, domain=DOMAIN):
                 elevation=float(self.hass.config.elevation),
             ),
         )
+
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Change the site after the fact.
+
+        The inverter limit is the field this exists for. It is optional at setup
+        because a guess that is too low truncates the forecast at the sunniest
+        moment, so the honest answer for most people is to leave it empty and fill
+        it in once they know -- which requires being able to come back.
+        """
+        entry = self._get_reconfigure_entry()
+        if user_input is not None:
+            ground_type: str = user_input[CONF_GROUND_TYPE]
+            data = {**user_input, CONF_ALBEDO: GROUND_TYPE_ALBEDO[ground_type]}
+            latitude: float = user_input[CONF_LATITUDE]
+            longitude: float = user_input[CONF_LONGITUDE]
+            await self.async_set_unique_id(f"{latitude:.5f}_{longitude:.5f}")
+            self._abort_if_unique_id_mismatch(reason="cannot_move_site")
+            return self.async_update_reload_and_abort(entry, data=data, title=str(user_input[CONF_NAME]))
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(site_schema(), entry.data),
+        )
