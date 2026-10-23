@@ -39,12 +39,33 @@ re-scaled so an ablation measures skill rather than bias.
 
 ## Does it actually do better?
 
-Against `ha-open-meteo-solar-forecast` on 297 days of measured five-minute production,
-with that integration emulated from its own source and fed the same tilted irradiance it
-really consumes: **27.7% lower RMSE and 85% less bias as served**, narrowing to 4.8% once
-both sides are given an oracle-fitted scalar. Most of the practical gap is calibration,
-which soular learns and the incumbent expects you to type in. Full numbers, decomposition
-and caveats in [docs/vs-open-meteo-solar-forecast.md](docs/vs-open-meteo-solar-forecast.md).
+Replayed against a year of measured five-minute production (October 2025 to October 2026,
+about a million samples on days held out from any fitting), at honest lead times:
+
+|                                                    | RMSE as served | bias as served | RMSE re-scaled |
+| -------------------------------------------------- | -------------: | -------------: | -------------: |
+| **Soular**                                         |    **2,119 W** |     **+161 W** |        2,092 W |
+| Soular without the learned correction              |        2,209 W |         +424 W |        2,100 W |
+| Soular without shading                             |        3,077 W |       +1,220 W |        2,530 W |
+| `ha-open-meteo-solar-forecast`, same horizon files |        2,675 W |         +773 W |        2,140 W |
+
+That is 21% lower error and 79% less bias than the incumbent as a user would see it, on a
+27.3 kWp site (2,119 W is 7.8% of capacity). "Re-scaled" gives every model its own best
+constant gain, fitted on other days, which isolates the *shape* of the forecast from its
+calibration: there the gap narrows to 2%. Most of the practical difference is calibration,
+which Soular learns from your inverter and the incumbent expects you to type in.
+
+One caveat on that table: the shading map was built from this same year, so for the
+map those numbers are partly in-sample. The clean test is a map built only from data up to
+2026-08-08 and scored on the ten weeks after it, which serves 1,936 W.
+
+The rest of the error is mostly the weather. Given the sky as the satellite actually observed
+it, rather than as it was forecast, the same model scores 1,580 W. No amount of modelling
+the roof better touches that difference.
+
+The incumbent emulation and the earlier, longer comparison are in
+[docs/vs-open-meteo-solar-forecast.md](docs/vs-open-meteo-solar-forecast.md); its numbers
+predate the shading-map tool and a channel-mapping fix, so the table above supersedes them.
 
 ## Status
 
