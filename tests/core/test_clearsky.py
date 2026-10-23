@@ -16,8 +16,8 @@ from custom_components.soular.core.clearsky import (
     clear_sky_index,
 )
 from custom_components.soular.core.geometry import solar_geometry
-from custom_components.soular.core.tests.conftest import SITE
 from custom_components.soular.core.types import SiteSpec, TimeArray
+from tests.core.conftest import SITE
 
 
 def test_clear_sky_is_zero_at_night(site: SiteSpec, summer_day: TimeArray) -> None:

@@ -23,8 +23,8 @@ from custom_components.soular.core.pipeline import (
 )
 from custom_components.soular.core.pvmodel import ac_power
 from custom_components.soular.core.shading import TransmittanceGrid
-from custom_components.soular.core.tests.conftest import ARRAYS, INVERTER, SITE
 from custom_components.soular.core.types import ArraySpec, FloatArray, InverterSpec, SiteSpec, TimeArray, TimeGrid
+from tests.core.conftest import ARRAYS, INVERTER, SITE
 
 
 def clear_weather(times: TimeArray, site: SiteSpec = SITE, *, scale: float = 1.0) -> WeatherSeries:

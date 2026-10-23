@@ -25,8 +25,8 @@ import pytest
 from custom_components.soular.core.clearsky import clear_sky
 from custom_components.soular.core.geometry import solar_geometry
 from custom_components.soular.core.irradiance import plane_of_array
-from custom_components.soular.core.tests.conftest import ARRAYS, day_times
 from custom_components.soular.core.types import ArraySpec, FloatArray, SiteSpec, TimeArray
+from tests.core.conftest import ARRAYS, day_times
 
 LATITUDE = -33.11915471966274
 LONGITUDE = 151.53401076793673

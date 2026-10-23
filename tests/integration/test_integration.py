@@ -19,7 +19,7 @@ from custom_components.soular import async_setup_entry
 from custom_components.soular.const import CONF_ALBEDO, CONF_INVERTER_AC_LIMIT, DOMAIN
 from custom_components.soular.diagnostics import async_get_config_entry_diagnostics
 from custom_components.soular.energy import async_get_solar_forecast
-from custom_components.soular.tests.conftest import ARRAY_DATA, build_entry
+from tests.integration.conftest import ARRAY_DATA, build_entry
 
 
 def state_of(hass: HomeAssistant, entity_id: str) -> str:

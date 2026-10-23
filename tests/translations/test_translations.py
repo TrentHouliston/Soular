@@ -14,8 +14,9 @@ from custom_components.soular.entities import ALL_SENSOR_KEYS
 from custom_components.soular.flows.array import array_schema
 from custom_components.soular.flows.hub import site_schema
 
-TRANSLATIONS = Path(__file__).parent.parent / "en.json"
-ICONS = Path(__file__).parent.parent.parent / "icons.json"
+COMPONENT = Path(__file__).parents[2] / "custom_components" / "soular"
+TRANSLATIONS = COMPONENT / "translations" / "en.json"
+ICONS = COMPONENT / "icons.json"
 
 
 @pytest.fixture(scope="module")

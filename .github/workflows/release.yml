@@ -5,7 +5,7 @@ on:
     types: [published]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate-release:
@@ -55,25 +55,3 @@ jobs:
             echo "::error::Tag version ($TAG_VERSION) does not match manifest.json version ($MANIFEST_VERSION)"
             exit 1
           fi
-
-  upload-assets:
-    name: Upload release assets
-    needs: validate-release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout the repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Create release package
-        run: |
-          # Tests live beside the code they cover; they must not ship to users.
-          cd custom_components/soular
-          zip -r ../../soular.zip . \
-            --exclude "tests/" "tests/*" "*/tests/" "*/tests/*" \
-            --exclude "*/__pycache__/" "*/__pycache__/*"
-
-      - name: Upload release assets
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
-        with:
-          files: |
-            soular.zip

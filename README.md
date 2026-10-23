@@ -111,13 +111,14 @@ uv run pyright
 uv run lint-imports
 ```
 
-| Path                             |                                                                            |
-| -------------------------------- | -------------------------------------------------------------------------- |
-| `custom_components/soular/`      | The integration. Only this ships to HACS.                                  |
-| `custom_components/soular/core/` | The physics and the learner. Home Assistant free by construction.          |
-| `tools/shading/`                 | Builds a shading map from measured per-array power (`uv run shading-map`). |
-| `tools/backtest.py`              | Replays the model against measured production (`uv run backtest`).         |
-| `tools/fetch_archive.py`         | Builds the weather archive both tools read (`uv run fetch-archive`).       |
+| Path                             |                                                                                    |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| `custom_components/soular/`      | The integration, and nothing else: HACS installs this folder straight from `main`. |
+| `custom_components/soular/core/` | The physics and the learner. Home Assistant free by construction.                  |
+| `tools/shading/`                 | Builds a shading map from measured per-array power (`uv run shading-map`).         |
+| `tools/backtest.py`              | Replays the model against measured production (`uv run backtest`).                 |
+| `tools/fetch_archive.py`         | Builds the weather archive both tools read (`uv run fetch-archive`).               |
+| `tests/`                         | Mirrors the integration and the tools.                                             |
 
 `core/` is limited by an import-linter contract to numpy, pandas and pvlib, and both tools
 reach the model only through it. That boundary is load-bearing: the backtest replays the

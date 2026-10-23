@@ -1,1 +1,1 @@
-"""Cross-cutting tests that span the integration and the developer tooling."""
+"""Tests, laid out to mirror custom_components/soular and tools/."""

@@ -16,8 +16,8 @@ from custom_components.soular.core.clearsky import clear_sky
 from custom_components.soular.core.geometry import solar_geometry
 from custom_components.soular.core.pipeline import SystemSpec, WeatherSeries, build_time_grid, forecast
 from custom_components.soular.core.shading import from_horizon, from_npz
-from custom_components.soular.core.tests.conftest import ARRAYS, INVERTER, SITE, day_times
 from custom_components.soular.core.types import TimeArray, TimeGrid
+from tests.core.conftest import ARRAYS, INVERTER, SITE, day_times
 
 SOLAR_DATA = Path("/Users/trenthouliston/Code/solar-data/outputs")
 GRID_FILE = SOLAR_DATA / "transmittance_grid.npz"

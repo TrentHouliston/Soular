@@ -20,7 +20,7 @@ from custom_components.soular.const import (
     SHADING_DIRECTORY,
     SUBENTRY_TYPE_ARRAY,
 )
-from custom_components.soular.tests.conftest import build_entry
+from tests.integration.conftest import build_entry
 
 ARRAY_INPUT: dict[str, Any] = {
     CONF_NAME: "east",

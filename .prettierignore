@@ -15,6 +15,3 @@ htmlcov/
 # Ignore python caches
 .grimp_cache/
 .import_linter_cache/
-
-# Recorded API payloads are captured verbatim so byte-level diffs stay meaningful
-custom_components/soular/tests/fixtures/responses/
