@@ -15,17 +15,9 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pytest
 
-from tools.backtest import (
-    Accumulator,
-    Site,
-    is_fit_day,
-    lead_days,
-    load_actuals,
-    load_site,
-    to_local_dates,
-    uniform_grid,
-)
+from tools.backtest import Accumulator, is_fit_day, lead_days, load_actuals, to_local_dates, uniform_grid
 from tools.fetch_archive import SCHEMA, date_chunks
+from tools.site import Site, load_site
 
 SYDNEY = ZoneInfo("Australia/Sydney")
 

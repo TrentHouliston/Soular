@@ -14,7 +14,6 @@ scale it by a nameplate rating. That hides several approximations that matter:
     worst-affected arrays.
 - **No feedback.** Your inverter knows exactly how wrong yesterday's forecast was, and
     nothing reads it.
-- **A single number.** A point estimate can't tell a battery optimiser how much to hedge.
 - **Isotropic sky.** Open-Meteo's `global_tilted_irradiance` uses an isotropic diffuse model
     with a hardcoded albedo of 0.2 — no circumsolar brightening, no horizon band.
 
@@ -27,17 +26,12 @@ it matters for getting absolute kWh right without calibration, but at a typical 
 is not where the accuracy comes from. Soular uses it because it is free and correct, not
 because it is the headline.
 
-Soular does its own Perez transposition, applies a measured graded transmittance map, blends
-satellite observations and your own array into the near-term forecast, produces P10/P50/P90
-from NWP ensembles, and continuously bias-corrects against your measured output.
-
-The uncertainty band is the one claim here that is not backtested, and it cannot be:
-Open-Meteo serves the current ensemble run and answers historical ranges with a correctly
-shaped response full of nulls. It is validated by unit tests on synthetic ensembles and by
-online coverage instead. What that band is careful about is that a day's P90 energy is not
-the integral of the pointwise P90 power -- that reading assumes every hour of the day hits
-its ninetieth percentile at once, and is wrong by roughly a factor of two on band width
-while looking entirely plausible.
+Soular does its own Perez transposition, applies a measured graded transmittance map, and
+continuously bias-corrects against your measured output. That is all it does, on purpose.
+Earlier versions also blended in a satellite nowcast and published a P10/P90 band from the
+weather ensemble. Neither earned its keep: the nowcast helped the first two hours and nothing
+after, and the band could never be checked against reality, because Open-Meteo keeps no
+archive of past ensemble runs. Both were removed.
 
 Every one of those claims is checked by an offline harness (`tools/backtest.py`) that replays
 the model against measured production, at honest lead times, with each variant separately
@@ -60,16 +54,22 @@ from one site.
 
 Known gaps, listed because they are the ones a user would notice: the learner
 starts cold rather than warm-starting from the recorder, so a fresh install
-spends about a week reaching its calibration; there are no skill diagnostics
-reporting the forecast's own error against a baseline; and the two designed
-repair issues -- a learning-not-helping warning and a swapped-shading-file
-detector -- are specified in `quality_scale.yaml` and not implemented.
+spends about a week reaching its calibration, and there are no skill diagnostics
+reporting the forecast's own error against a baseline.
 
 ## Installation
 
 Add `https://github.com/TrentHouliston/soular` to HACS as a custom repository,
-restart, then add the integration. Full setup, entity list, wiring and
-troubleshooting are in [docs/configuration.md](docs/configuration.md).
+restart, then add the integration. Add one array per roof plane; each becomes its
+own device under the site. Full setup, entity list, wiring and troubleshooting are
+in [docs/configuration.md](docs/configuration.md).
+
+## Making a shading map
+
+The shading map is where most of the accuracy comes from, and it is built from your
+own array's measured output. With about a year of five-minute per-array power in a
+CSV, `uv run shading-map` turns it into the `.npz` the integration reads. See
+[docs/shading-maps.md](docs/shading-maps.md).
 
 ### A note on size
 
@@ -90,10 +90,18 @@ uv run pyright
 uv run lint-imports
 ```
 
-`custom_components/soular/core/` is Home Assistant free by construction — an import-linter
-contract limits it to numpy, pandas and pvlib. That boundary is load-bearing: the offline
-backtest harness in `tools/` replays the exact same code path the integration runs, so the
-skill numbers it reports describe the shipped model rather than an approximation of it.
+| Path                             |                                                                            |
+| -------------------------------- | -------------------------------------------------------------------------- |
+| `custom_components/soular/`      | The integration. Only this ships to HACS.                                  |
+| `custom_components/soular/core/` | The physics and the learner. Home Assistant free by construction.          |
+| `tools/shading/`                 | Builds a shading map from measured per-array power (`uv run shading-map`). |
+| `tools/backtest.py`              | Replays the model against measured production (`uv run backtest`).         |
+| `tools/fetch_archive.py`         | Builds the weather archive both tools read (`uv run fetch-archive`).       |
+
+`core/` is limited by an import-linter contract to numpy, pandas and pvlib, and both tools
+reach the model only through it. That boundary is load-bearing: the backtest replays the
+exact code path the integration runs, and the shading map is measured through the same
+optics that will consume it.
 
 ## Licence
 

@@ -7,7 +7,7 @@ belong to an individual array.
 
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, ConfigSubentryFlow
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState, ConfigFlow, ConfigFlowResult, ConfigSubentryFlow
 from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE, CONF_NAME
 from homeassistant.core import callback
 from homeassistant.helpers import selector
@@ -123,7 +123,13 @@ class HubConfigFlow(ConfigFlow, domain=DOMAIN):
             longitude: float = user_input[CONF_LONGITUDE]
             await self.async_set_unique_id(f"{latitude:.5f}_{longitude:.5f}")
             self._abort_if_unique_id_mismatch(reason="cannot_move_site")
-            return self.async_update_reload_and_abort(entry, data=data, title=str(user_input[CONF_NAME]))
+            title = str(user_input[CONF_NAME])
+            # A loaded entry reloads itself through its update listener; reloading
+            # here as well would set the site up twice. One that failed to load has
+            # no listener yet, and the edit may be exactly what fixes it.
+            if entry.state is ConfigEntryState.LOADED:
+                return self.async_update_and_abort(entry, data=data, title=title)
+            return self.async_update_reload_and_abort(entry, data=data, title=title)
 
         return self.async_show_form(
             step_id="reconfigure",

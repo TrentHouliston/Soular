@@ -40,7 +40,6 @@ import math
 from pathlib import Path
 import sqlite3
 import sys
-import tomllib
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -55,8 +54,9 @@ from custom_components.soular.core.irradiance import decompose
 from custom_components.soular.core.mask import MaskInputs, usable
 from custom_components.soular.core.pipeline import SystemSpec, WeatherSeries, forecast
 from custom_components.soular.core.shading import TransmittanceGrid, from_horizon, from_npz
-from custom_components.soular.core.types import ArraySpec, FloatArray, InverterSpec, SiteSpec, TimeArray, TimeGrid
+from custom_components.soular.core.types import FloatArray, SiteSpec, TimeArray, TimeGrid
 from tools.incumbent import IncumbentArray, TiltedArchive, forecast_site
+from tools.site import Site, load_site
 
 if TYPE_CHECKING:  # pragma: no cover
     from collections.abc import Iterator
@@ -100,41 +100,6 @@ INCUMBENT_ALBEDO = 0.2
 INCUMBENT_ROSS_COEFFICIENT = 0.0342  # "not so well cooled", hardcoded upstream
 INCUMBENT_ALPHA_TEMP = -0.004
 INCUMBENT_EFFICIENCY = 0.9
-
-
-@dataclass(frozen=True, slots=True)
-class Site:
-    """A parsed ``arrays.toml``."""
-
-    spec: SiteSpec
-    arrays: tuple[ArraySpec, ...]
-    inverter: InverterSpec
-    timezone: ZoneInfo
-
-
-def load_site(path: Path, *, ac_limit_w: float) -> Site:
-    """Read site and array geometry from the analysis repo's config."""
-    config = tomllib.loads(path.read_text())
-    site = config["site"]
-    arrays = tuple(
-        ArraySpec(
-            name=name,
-            azimuth_deg=float(entry["azimuth"]),
-            tilt_deg=float(entry["tilt"]),
-            dc_capacity_w=float(entry["dc_watts"]),
-        )
-        for name, entry in sorted(config["arrays"].items())
-    )
-    return Site(
-        spec=SiteSpec(
-            latitude=float(site["latitude"]),
-            longitude=float(site["longitude"]),
-            elevation_m=float(site.get("altitude", 0.0)),
-        ),
-        arrays=arrays,
-        inverter=InverterSpec(name="default", ac_limit_w=ac_limit_w),
-        timezone=ZoneInfo(str(site.get("timezone", "UTC"))),
-    )
 
 
 @dataclass(frozen=True, slots=True)

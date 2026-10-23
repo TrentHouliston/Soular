@@ -6,6 +6,7 @@ forecast that was identically zero, because every assertion was structural.
 """
 
 from typing import Any
+from unittest.mock import patch
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
@@ -14,7 +15,8 @@ from homeassistant.helpers import entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.soular.const import DOMAIN
+from custom_components.soular import async_setup_entry
+from custom_components.soular.const import CONF_ALBEDO, CONF_INVERTER_AC_LIMIT, DOMAIN
 from custom_components.soular.diagnostics import async_get_config_entry_diagnostics
 from custom_components.soular.energy import async_get_solar_forecast
 from custom_components.soular.tests.conftest import ARRAY_DATA, build_entry
@@ -175,3 +177,27 @@ async def test_a_site_with_no_arrays_still_loads(hass: HomeAssistant, mock_weath
 
     assert entry.state is ConfigEntryState.LOADED
     assert float(state_of(hass, SITE_POWER)) == 0.0
+
+
+async def test_reconfiguring_a_loaded_site_sets_it_up_once(hass: HomeAssistant, configured: MockConfigEntry) -> None:
+    """The update listener reloads the entry, so the flow must not reload it too.
+
+    Reloading twice rebuilds the coordinator twice and fetches the weather twice
+    for one edit -- harmless once, but it is the kind of double work that hides.
+    """
+    with patch("custom_components.soular.async_setup_entry", wraps=async_setup_entry) as setup:
+        result = await configured.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            # The form takes the site's own fields; albedo is derived from ground type.
+            result["flow_id"],
+            user_input={
+                **{key: value for key, value in configured.data.items() if key != CONF_ALBEDO},
+                CONF_INVERTER_AC_LIMIT: 30000.0,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result.get("reason") == "reconfigure_successful"
+    assert setup.call_count == 1
+    assert configured.state is ConfigEntryState.LOADED
+    assert configured.data[CONF_INVERTER_AC_LIMIT] == 30000.0

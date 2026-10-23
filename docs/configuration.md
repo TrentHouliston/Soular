@@ -50,19 +50,14 @@ waking earlier than west, and for one plane being shaded while another is not.
 
 ### Measured power
 
-Point this at the sensor reporting this array's actual output. It does two
-things, and both are worth more than any physics option on this page.
-
-It **calibrates the forecast.** Soular fits a small recursive regression against
+Point this at the sensor reporting this array's actual output. It is worth more
+than any physics option on this page, because it **calibrates the forecast.**
+Soular fits a small recursive regression against
 your measured output and applies the result as a multiplicative correction. On
 the site this was built against, that correction settles around 0.94 — meaning
 the uncalibrated physics over-predicts by about 6%, which is typical. Because
 the fit forgets exponentially over about thirty days of daylight, it tracks
 soiling, pruning and panel degradation rather than freezing a number.
-
-It also **feeds the nowcast.** A working array is a well-sited pyranometer you
-already own, with about a minute of latency, and its reading of how bright it is
-right now beats any weather model at that horizon.
 
 Without it the array runs on physics alone. That still works — it is what every
 other solar forecast integration does — but the first thing to check when the
@@ -90,6 +85,10 @@ nothing — but a graded map is where the accuracy is.
 The file is parsed when you submit the form, so a wrong filename or an
 unreadable file is reported there rather than becoming a silently unshaded array.
 
+To make a graded map from your own array's measured output, see
+[shading-maps.md](shading-maps.md). It needs about a year of five-minute
+per-array power, so the sun has visited every part of the sky it ever will.
+
 ## What you get
 
 On the site device:
@@ -97,9 +96,7 @@ On the site device:
 | Entity                                                               |                                                                                        |
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | **Estimated power production - now**                                 | The current forecast, and the entity carrying the full 48-hour series as an attribute. |
-| **Estimated power production - now (P10 / P90)**                     | The confidence band on that number.                                                    |
 | **Estimated energy production - today / remaining today / tomorrow** | Daily totals in kWh.                                                                   |
-| **Estimated energy production - today / tomorrow (P10 / P90)**       | The band on those totals.                                                              |
 | **Estimated energy production - this hour / next hour**              | Disabled by default.                                                                   |
 | **Highest power peak time - today / tomorrow**                       | When the peak lands.                                                                   |
 
@@ -107,50 +104,32 @@ Each array gets the same power and energy sensors for its own plane, plus
 diagnostics that start disabled: plane-of-array irradiance, cell temperature,
 shading transmittance, the learned correction and how many samples are behind it.
 
-Site diagnostics, also disabled by default, report the nowcast contribution and
-when each source last updated.
-
-### The confidence band
-
-P10 and P90 come from the ECMWF ensemble — fifty-one runs of the weather model
-that disagree with each other, which is the only honest measure of how uncertain
-tomorrow is. When the ensemble is unavailable these report **unknown** rather
-than falling back to the median, because a band that quietly collapses onto the
-point forecast reads as certainty.
-
-The day-ahead energy bounds are not the pointwise power bounds added up. Summing
-pointwise P90s would assume every hour of the day hits its ninetieth percentile
-at once; the totals here integrate whole plausible days and take quantiles of
-those, which is a factor of about two narrower and is the number that means what
-it says.
+A site diagnostic, also disabled by default, reports when the weather was last
+fetched.
 
 ## Wiring it up
 
 **Energy dashboard.** Settings → Dashboards → Energy → Solar panels → add your
 production sensor, and pick Soular under "forecast production". Soular supplies
-the site's hourly P50.
+the site's hourly forecast.
 
 **haeo.** Point a solar element at
 `sensor.<site>_estimated_power_production_now`. Soular emits haeo's own richest
 forecast format — the series with units and interpolation mode — starting at
 now and spanning exactly 48 hours, which is what haeo's forecast cycle expects.
-If you would rather your battery plan hedged, point it at the P10 sensor instead;
-that is a risk posture, not a correction.
 
 ## How often it updates
 
-| Source         | Interval                | What is lost if it fails                                                                           |
-| -------------- | ----------------------- | -------------------------------------------------------------------------------------------------- |
-| Weather model  | 30 minutes              | Everything. This is the backbone, and a failure here marks the integration unavailable.            |
-| Satellite      | 10 minutes              | The nowcast. The next couple of hours revert to the weather model, which is what they were before. |
-| Ensemble       | 1 hour                  | The P10/P90 band, which reports unknown.                                                           |
-| Your own array | Every coordinator cycle | A minute-latency observation, and the calibration signal.                                          |
+| Source         | Interval        | What is lost if it fails                                                                                                                     |
+| -------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Weather model  | 30 minutes      | Nothing at first: the last forecast keeps being served. After six hours without a fresh one the sensors go unavailable rather than go stale. |
+| Your own array | Every 5 minutes | The calibration signal. The correction holds its last value.                                                                                 |
 
-The two optional sources fail independently and neither can take the other down.
-**Settings → System → Repairs → System information** reports which of the three
-endpoints is reachable — worth checking before concluding the forecast is wrong,
-because a forecast still being produced says nothing about whether the satellite
-is up.
+The forecast itself is recomputed every five minutes regardless, because the sun
+keeps moving even when the weather does not. **Settings → System → Repairs →
+System information** reports whether Open-Meteo is reachable — worth checking
+before concluding the forecast is wrong, because a cached forecast keeps being
+served for hours after the source has gone.
 
 ## When it looks wrong
 
@@ -177,7 +156,7 @@ well, or the measured-power sensor is not set. A battery that is full most of th
 day genuinely does leave few usable samples.
 
 For anything else, **Devices & services → Soular → three dots → Download
-diagnostics** dumps the geometry, the health of each source and a summary of the
+diagnostics** dumps the geometry, the weather fetch status and a summary of the
 current forecast, with coordinates redacted.
 
 ## Removing it

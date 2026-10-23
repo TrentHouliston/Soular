@@ -10,6 +10,7 @@ dependencies = ["homeassistant>=2026.1.1", "numpy>=2.3.2", "pvlib>=0.15.2"]
 [project.scripts]
 backtest = "tools.backtest:main"
 fetch-archive = "tools.fetch_archive:main"
+shading-map = "tools.shading.cli:main"
 
 [dependency-groups]
 dev = [
@@ -128,10 +129,6 @@ split-on-trailing-comma = false
     'FBT001', # Boolean positional argument - required by import-linter Contract interface
 ]
 
-# One-off analysis scripts, kept because their output is worth reproducing but
-# not held to the same standard as shipped code.
-"tools/resid_diag.py" = ['ALL']
-
 [tool.ruff.lint.pylint]
 max-args = 10
 max-branches = 15
@@ -229,6 +226,22 @@ allow_modules = [
     "tabulate",
     # The emulation of the competing integration.
     "tools.incumbent",
+    "tools.site",
+]
+
+# A map is only valid for the optics it was measured through, so the map builder
+# reaches the physics only through `core` -- the code the integration forecasts with.
+[[tool.importlinter.contracts]]
+name = "shading-map builder only uses core"
+type = "allowlist"
+source_modules = ["tools.shading"]
+allow_modules = [
+    "custom_components.soular.core",
+    "numpy",
+    "pandas",
+    "scipy",
+    "tools.fetch_archive",
+    "tools.site",
 ]
 
 # The emulation must share nothing with soular's model, or the comparison would

@@ -344,6 +344,7 @@ def fetch_satellite(
     longitude: float,
     start: dt.date,
     end: dt.date,
+    model: str = SATELLITE_MODEL,
 ) -> int:
     """Pull observed irradiance at the satellite's native 10-minute cadence."""
     rows = 0
@@ -352,9 +353,9 @@ def fetch_satellite(
             "latitude": f"{latitude:.6f}",
             "longitude": f"{longitude:.6f}",
             "hourly": ",".join(SATELLITE_VARIABLES),
-            "models": SATELLITE_MODEL,
-            # Without this the response is resampled to hourly, throwing away
-            # exactly the sub-hourly variability the nowcast exists to capture.
+            "models": model,
+            # Without this the response is resampled to hourly, smearing broken
+            # cloud into a sky that looks partly clear for the whole hour.
             "temporal_resolution": "native",
             "start_date": chunk_start.isoformat(),
             "end_date": chunk_end.isoformat(),
