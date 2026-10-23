@@ -174,10 +174,10 @@ def build_synthetic_db(path: Path, times: np.ndarray) -> None:
 
 
 def test_channel_swap_is_honoured(tmp_path: Path) -> None:
-    """PV1 and PV2 change arrays when the MPPT inputs were re-plugged.
+    """Three channels change arrays when the MPPT inputs were re-plugged.
 
-    Getting this wrong makes east and west look mysteriously broken for the last
-    seven weeks of the record, in a way that reads as a shading error.
+    Getting this wrong makes arrays look mysteriously broken after the re-plug,
+    in a way that reads as a shading error.
     """
     times = uniform_grid(dt.date(2026, 6, 16), dt.date(2026, 6, 22))
     db = tmp_path / "solar.db"
@@ -189,14 +189,13 @@ def test_channel_swap_is_honoured(tmp_path: Path) -> None:
     before = times < swap - np.timedelta64(86400, "s")
     after = times > swap + np.timedelta64(86400, "s")
 
-    # PV1 feeds east before the swap and west after it; PV2 the other way round.
-    assert np.nanmedian(actuals.dc_by_array["east"][before]) == pytest.approx(1000.0)
-    assert np.nanmedian(actuals.dc_by_array["west"][before]) == pytest.approx(2000.0)
-    assert np.nanmedian(actuals.dc_by_array["east"][after]) == pytest.approx(2000.0)
-    assert np.nanmedian(actuals.dc_by_array["west"][after]) == pytest.approx(1000.0)
-    # Unaffected channels stay put.
-    assert np.nanmedian(actuals.dc_by_array["north"][before]) == pytest.approx(3000.0)
-    assert np.nanmedian(actuals.dc_by_array["south"][after]) == pytest.approx(4000.0)
+    def level(array: str, when: np.ndarray) -> float:
+        return float(np.nanmedian(actuals.dc_by_array[array][when]))
+
+    # Before: PV1..PV4 are east, west, north, south.
+    assert [level(a, before) for a in ("east", "west", "north", "south")] == pytest.approx([1000, 2000, 3000, 4000])
+    # After: PV1 north, PV2 east, PV3 west, PV4 south.
+    assert [level(a, after) for a in ("east", "west", "north", "south")] == pytest.approx([2000, 3000, 1000, 4000])
 
 
 def test_days_around_the_swap_are_excluded(tmp_path: Path) -> None:

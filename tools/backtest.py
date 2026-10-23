@@ -81,11 +81,17 @@ SATELLITE_OBSERVATION_COUNT = 3
 # The MPPT channels were re-plugged when an EV charger went in. Days either side
 # of the changeover are dropped rather than guessed at, since the exact hour is
 # not recorded and a wrong attribution would look like a shading error.
+#
+# The re-plug was a rotation of three channels, not an east/west swap: PV1 now
+# carries north and PV3 west. An earlier mapping fitted on seven weeks of winter
+# data had PV1 and PV3 the wrong way round, which read as north degrading. With
+# spring data the assignment is unambiguous -- under the old mapping the
+# 13-module north string peaks at 6.85 kW, past its 5.72 kWp nameplate.
 CHANNEL_SWAP_DATE = dt.date(2026, 6, 19)
 CHANNEL_SWAP_BUFFER_DAYS = 1
 
 CHANNELS_BEFORE = {"PV1_POWER": "east", "PV2_POWER": "west", "PV3_POWER": "north", "PV4_POWER": "south"}
-CHANNELS_AFTER = {"PV1_POWER": "west", "PV2_POWER": "east", "PV3_POWER": "north", "PV4_POWER": "south"}
+CHANNELS_AFTER = {"PV1_POWER": "north", "PV2_POWER": "east", "PV3_POWER": "west", "PV4_POWER": "south"}
 
 # Battery-full curtailment and export limiting are real lost production that no
 # forecast can predict, so those samples are excluded from scoring. The threshold
