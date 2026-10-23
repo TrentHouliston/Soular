@@ -55,7 +55,10 @@
   "config_subentries": {
     "array": {
       "entry_type": "Array",
-      "initiate_flow": { "user": "Add an array", "reconfigure": "Reconfigure array" },
+      "initiate_flow": {
+        "user": "Add an array",
+        "reconfigure": "Reconfigure array"
+      },
       "step": {
         "user": {
           "title": "Add a solar array",
@@ -116,29 +119,48 @@
   },
   "entity": {
     "sensor": {
-      "cell_temperature": { "name": "Cell temperature" },
-      "correction_factor": { "name": "Learned correction" },
-      "energy_current_hour": { "name": "Estimated energy production - this hour" },
-      "energy_next_hour": { "name": "Estimated energy production - next hour" },
-      "energy_production_today": { "name": "Estimated energy production - today" },
-      "energy_production_today_p10": { "name": "Estimated energy production - today (P10)" },
-      "energy_production_today_p90": { "name": "Estimated energy production - today (P90)" },
-      "energy_production_today_remaining": { "name": "Estimated energy production - remaining today" },
-      "energy_production_tomorrow": { "name": "Estimated energy production - tomorrow" },
-      "energy_production_tomorrow_p10": { "name": "Estimated energy production - tomorrow (P10)" },
-      "energy_production_tomorrow_p90": { "name": "Estimated energy production - tomorrow (P90)" },
-      "last_update_ensemble": { "name": "Ensemble last updated" },
-      "last_update_forecast": { "name": "Forecast last updated" },
-      "last_update_satellite": { "name": "Satellite last updated" },
-      "learning_samples": { "name": "Learning samples" },
-      "nowcast_share": { "name": "Nowcast contribution" },
-      "poa_irradiance": { "name": "Plane-of-array irradiance" },
-      "power_highest_peak_time_today": { "name": "Highest power peak time - today" },
-      "power_highest_peak_time_tomorrow": { "name": "Highest power peak time - tomorrow" },
-      "power_production_now": { "name": "Estimated power production - now" },
-      "power_production_now_p10": { "name": "Estimated power production - now (P10)" },
-      "power_production_now_p90": { "name": "Estimated power production - now (P90)" },
-      "shading_transmittance": { "name": "Shading transmittance" }
+      "cell_temperature": {
+        "name": "Cell temperature"
+      },
+      "correction_factor": {
+        "name": "Learned correction"
+      },
+      "energy_current_hour": {
+        "name": "Estimated energy production - this hour"
+      },
+      "energy_next_hour": {
+        "name": "Estimated energy production - next hour"
+      },
+      "energy_production_today": {
+        "name": "Estimated energy production - today"
+      },
+      "energy_production_today_remaining": {
+        "name": "Estimated energy production - remaining today"
+      },
+      "energy_production_tomorrow": {
+        "name": "Estimated energy production - tomorrow"
+      },
+      "last_update_forecast": {
+        "name": "Forecast last updated"
+      },
+      "learning_samples": {
+        "name": "Learning samples"
+      },
+      "poa_irradiance": {
+        "name": "Plane-of-array irradiance"
+      },
+      "power_highest_peak_time_today": {
+        "name": "Highest power peak time - today"
+      },
+      "power_highest_peak_time_tomorrow": {
+        "name": "Highest power peak time - tomorrow"
+      },
+      "power_production_now": {
+        "name": "Estimated power production - now"
+      },
+      "shading_transmittance": {
+        "name": "Shading transmittance"
+      }
     }
   },
   "selector": {

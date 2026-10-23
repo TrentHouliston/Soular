@@ -48,12 +48,6 @@ import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
 
-from custom_components.soular.core.blend import (
-    Observation,
-    apply_to_weather,
-    observation_from_irradiance,
-    satellite_observation,
-)
 from custom_components.soular.core.clearsky import clear_sky, clear_sky_index, resample_to_grid
 from custom_components.soular.core.correction import CorrectionState, build_features, observation_target, sample_weight
 from custom_components.soular.core.geometry import solar_geometry
@@ -70,13 +64,6 @@ if TYPE_CHECKING:  # pragma: no cover
 STEP_SECONDS = 300
 HORIZON_HOURS = 48
 
-# The satellite archive publishes in arrears. At issue time the freshest
-# observation available is roughly this old, and pretending otherwise would let
-# the nowcast see cloud that had not been reported yet.
-SATELLITE_LATENCY_MINUTES = 30
-# How many recent observations to persist from. More than a couple adds little:
-# they are ten minutes apart and highly correlated.
-SATELLITE_OBSERVATION_COUNT = 3
 
 # The MPPT channels were re-plugged when an EV charger went in. Days either side
 # of the changeover are dropped rather than guessed at, since the exact hour is
@@ -310,8 +297,6 @@ class Variant:
     # Use the hard-horizon files instead of the graded transmittance grids, so
     # the value of grading can be separated from the value of shading at all.
     hard_horizon: bool = False
-    # Blend recent satellite observations into the forecast by persistence.
-    nowcast: bool = False
     # Apply the online bias correction, learned strictly from the past.
     learning: bool = False
     # Run the faithful emulation of the incumbent integration instead of soular.
@@ -330,8 +315,7 @@ VARIANTS: tuple[Variant, ...] = (
     Variant("no-perez-observed", "isotropic sky, satellite irradiance", "observed", transposition="isotropic"),
     Variant("hard-horizon", "Soular optics with a hard horizon", "forecast", hard_horizon=True),
     Variant("hard-horizon-observed", "hard horizon, satellite irradiance", "observed", hard_horizon=True),
-    Variant("nowcast", "forecast irradiance plus a satellite nowcast", "forecast", nowcast=True),
-    Variant("learning", "everything, plus the online bias correction", "forecast", nowcast=True, learning=True),
+    Variant("learning", "everything, plus the online bias correction", "forecast", learning=True),
     Variant("upstream", "ha-open-meteo-solar-forecast, as it actually runs", "forecast", upstream=True),
     Variant(
         "upstream-no-offset",
@@ -423,8 +407,6 @@ def weather_for(
     grid: TimeGrid,
     issue: np.datetime64,
     driver: str,
-    *,
-    nowcast: bool = False,
 ) -> WeatherSeries | None:
     """Assemble the weather a variant sees, respecting lead time."""
     geometry = solar_geometry(grid.times, site.spec)
@@ -480,12 +462,7 @@ def weather_for(
     else:
         dni, dhi = decompose(grid.times, ghi, geometry)
 
-    series = WeatherSeries(ghi=ghi, dni=dni, dhi=dhi, temp_air=temp, wind_speed_10m=wind)
-    if nowcast:
-        observations = _satellite_observations(archive, site, issue)
-        if observations:
-            series, _ = apply_to_weather(series, grid.times, clearsky.ghi, geometry, observations)
-    return series
+    return WeatherSeries(ghi=ghi, dni=dni, dhi=dhi, temp_air=temp, wind_speed_10m=wind)
 
 
 def _upstream_forecast(
@@ -543,37 +520,6 @@ def _upstream_forecast(
         ),
         dtype=np.float64,
     )
-
-
-def _satellite_observations(archive: Archive, site: Site, issue: np.datetime64) -> list[Observation]:
-    """Satellite observations that had actually been published at the issue time.
-
-    Only observations at or before ``issue - latency`` are eligible. The archive
-    holds the whole record, so without that cutoff the nowcast would be reading
-    cloud that had not been published yet -- the single easiest way to
-    manufacture skill that does not exist.
-    """
-    cutoff = issue - np.timedelta64(SATELLITE_LATENCY_MINUTES * 60, "s")
-    table = archive.satellite.get("shortwave_radiation")
-    if not table:
-        return []
-
-    stamps = np.array(sorted(stamp for stamp in table if stamp <= cutoff), dtype="datetime64[s]")
-    if stamps.size == 0:
-        return []
-    recent = stamps[-SATELLITE_OBSERVATION_COUNT:]
-
-    # Clear sky at the observation instants, so the ratio is well posed there
-    # rather than being borrowed from the forecast grid.
-    geometry = solar_geometry(recent, site.spec)
-    observed_clearsky = clear_sky(recent, site.spec, geometry).ghi
-
-    observations: list[Observation] = []
-    for stamp, clear in zip(recent, observed_clearsky, strict=True):
-        k = observation_from_irradiance(stamp, table[stamp], float(clear))
-        if k is not None:
-            observations.append(satellite_observation(stamp, k))
-    return observations
 
 
 def _ambient(archive: Archive, grid: TimeGrid, leads: FloatArray, variable: str, default: float) -> FloatArray:
@@ -893,7 +839,7 @@ def run(
             learner.advance_to(issue)
 
         for variant in variants:
-            weather = weather_for(archive, site, grid, issue, variant.driver, nowcast=variant.nowcast)
+            weather = weather_for(archive, site, grid, issue, variant.driver)
             if weather is None:
                 continue
 
@@ -1152,7 +1098,6 @@ def report(
         ("forecast", "no-shading", "hard-horizon", "a hard horizon, vs no shading at all"),
         ("forecast", "hard-horizon", "soular", "grading the shading, vs a hard horizon"),
         ("observed", "hard-horizon-observed", "soular-observed", "grading the shading, weather removed"),
-        ("forecast", "soular", "nowcast", "a satellite nowcast, on top of everything"),
     ):
         if base not in scores or comparison not in scores:
             continue
@@ -1164,8 +1109,8 @@ def report(
         delta = 1.0 - after_rmse / before_rmse
         lines.append(f"- **{what}** ({driver} driver): RMSE {before_rmse:,.0f} W -> {after_rmse:,.0f} W, {delta:+.1%}")
 
-    if "learning" in scores and "nowcast" in scores:
-        before, after = scores["nowcast"].site, scores["learning"].site
+    if "learning" in scores and "soular" in scores:
+        before, after = scores["soular"].site, scores["learning"].site
         if before.n and after.n:
             lines += [
                 "",
@@ -1177,23 +1122,10 @@ def report(
                 ),
                 f"- bias {before.mbe(1.0):+,.0f} W -> {after.mbe(1.0):+,.0f} W",
                 (
-                    f"- residual scalar still needed: {scores['nowcast'].fit_site.gain:.3f} -> "
+                    f"- residual scalar still needed: {scores['soular'].fit_site.gain:.3f} -> "
                     f"{scores['learning'].fit_site.gain:.3f} (1.000 would be perfectly calibrated)"
                 ),
             ]
-
-    if "nowcast" in scores and "soular" in scores:
-        lines += ["", "Nowcast effect by lead time, generating hours only:", ""]
-        for label, _, _ in LEAD_BUCKETS:
-            before = scores["soular"].per_lead_daylight[label]
-            after = scores["nowcast"].per_lead_daylight[label]
-            if before.n and after.n:
-                before_rmse = before.rmse(gains["soular"])
-                after_rmse = after.rmse(gains["nowcast"])
-                lines.append(
-                    f"- {label}: {before_rmse:,.0f} W -> {after_rmse:,.0f} W, "
-                    f"{1.0 - after_rmse / before_rmse:+.1%} (n={after.n:,})"
-                )
 
     if "no-shading-observed" in scores and "soular-observed" in scores:
         lines += ["", "Per-array shading benefit, weather removed:", ""]

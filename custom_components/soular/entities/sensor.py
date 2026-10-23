@@ -14,7 +14,6 @@ from custom_components.soular.core.series import power_at
 from custom_components.soular.core.types import FloatArray, TimeArray
 from custom_components.soular.entities import (
     ArrayDiagnosticDescription,
-    QuantileDescription,
     SiteDiagnosticDescription,
     SoularSensorEntityDescription,
     Window,
@@ -142,44 +141,6 @@ class SoularForecastSensor(SoularSensorBase):
         }
 
 
-class SoularQuantileSensor(SoularSensorBase):
-    """A confidence bound on the forecast, supplied by the NWP ensemble.
-
-    When no ensemble is available this reports ``unknown`` rather than falling
-    back to the median. A band that quietly collapses onto the point forecast
-    reads as certainty, which is the opposite of what has happened, and a
-    consumer hedging against it would hedge against nothing.
-    """
-
-    entity_description: QuantileDescription
-
-    def __init__(
-        self,
-        coordinator: SoularCoordinator,
-        description: QuantileDescription,
-        entry: ConfigEntry,
-        site_name: str,
-    ) -> None:
-        """Set up a site-level quantile sensor."""
-        identifier = site_identifier(entry)
-        super().__init__(coordinator, f"{identifier[1]}_{description.key}")
-        self.entity_description = description
-        self._attr_device_info = site_device(entry, site_name)
-
-    @property
-    def native_value(self) -> float | None:
-        """Read the requested quantile, or nothing if there is no spread."""
-        description = self.entity_description
-        if description.day is not None:
-            return self.coordinator.quantile_energy.get(description.day, {}).get(description.level)
-
-        power = self.coordinator.quantile_power.get(description.level)
-        if power is None:
-            return None
-        times = self.coordinator.data.times
-        return power_at(times, power, local_window(times).now)
-
-
 class SoularArrayDiagnosticSensor(SoularSensorBase):
     """A per-array diagnostic sampled at the current instant."""
 
@@ -252,8 +213,4 @@ class SoularSiteDiagnosticSensor(SoularSensorBase):
     @property
     def native_value(self) -> Any:
         """Read the coordinator attribute this sensor reports."""
-        value = getattr(self.coordinator, self.entity_description.attribute, None)
-        # A share is a fraction in the model and a percentage on a dashboard.
-        if isinstance(value, float) and self.entity_description.key == "nowcast_share":
-            return value * 100.0
-        return value
+        return getattr(self.coordinator, self.entity_description.attribute, None)

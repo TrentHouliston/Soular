@@ -1,7 +1,7 @@
 """Clear-sky irradiance, and the clear-sky index that everything is blended in.
 
 Clear sky is the backbone of the whole forecast, not just a fallback. Every
-irradiance source -- deterministic NWP, satellite observation, ensemble member --
+irradiance source -- the NWP forecast, or a satellite observation in the backtest --
 is converted to a clear-sky index ``k = GHI / GHI_clearsky`` before it is
 combined with any other, then converted back. Two reasons:
 

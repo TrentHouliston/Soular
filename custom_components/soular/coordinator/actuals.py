@@ -6,8 +6,8 @@ days of daylight to reach a useful correction on a fresh install -- which the
 ramp-in already imposes anyway.
 
 Nothing here decides whether a sample is trustworthy; that is
-:mod:`custom_components.soular.core.mask`, shared with the nowcast so a curtailed
-sample cannot mean one thing to the learner and another to the forecast.
+:mod:`custom_components.soular.core.mask`, which is pure so the backtest applies
+exactly the same rules.
 """
 
 from dataclasses import dataclass, field

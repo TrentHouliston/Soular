@@ -1,10 +1,8 @@
 """Decide which measured samples are telling the truth about irradiance.
 
-Used by two things that must agree: the online correction, which learns from
-measured output, and the nowcast, which reads the array as an irradiance sensor.
-One function, two consumers -- because a curtailed sample would tell the nowcast
-the sky had just gone dark, and tell the correction the array had just lost a
-tenth of its efficiency, and both would be wrong in the same way.
+Used by the online correction, which learns from measured output. A curtailed
+sample would tell it the array had just lost a tenth of its efficiency, and the
+forecast would then under-predict every sunny afternoon that followed.
 
 Curtailment is the dominant problem on a battery site. When the battery is full
 and export is limited, the inverter throttles the array, and it does so at the

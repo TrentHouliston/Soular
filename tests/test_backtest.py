@@ -274,7 +274,7 @@ def test_cache_schema_applies_cleanly(tmp_path: Path) -> None:
     connection.executescript(SCHEMA)
     connection.executescript(SCHEMA)
     tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert {"raw_responses", "nwp", "satellite", "ensemble", "meta"} <= tables
+    assert {"raw_responses", "nwp", "satellite", "meta"} <= tables
     connection.close()
 
 

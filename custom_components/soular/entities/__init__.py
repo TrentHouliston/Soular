@@ -136,75 +136,6 @@ SENSOR_KEYS: Final[frozenset[str]] = frozenset(entry.key for entry in SENSOR_DES
 
 
 @dataclass(frozen=True, kw_only=True)
-class QuantileDescription(SensorEntityDescription):
-    """A confidence bound, read from the ensemble rather than the point forecast."""
-
-    level: float
-    # Which day's energy, or None for instantaneous power.
-    day: str | None = None
-
-
-QUANTILE_DESCRIPTIONS: Final[tuple[QuantileDescription, ...]] = (
-    QuantileDescription(
-        key="power_production_now_p10",
-        translation_key="power_production_now_p10",
-        device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        suggested_display_precision=0,
-        level=0.1,
-    ),
-    QuantileDescription(
-        key="power_production_now_p90",
-        translation_key="power_production_now_p90",
-        device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        suggested_display_precision=0,
-        level=0.9,
-    ),
-    QuantileDescription(
-        key="energy_production_today_p10",
-        translation_key="energy_production_today_p10",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        suggested_display_precision=1,
-        level=0.1,
-        day="today",
-    ),
-    QuantileDescription(
-        key="energy_production_today_p90",
-        translation_key="energy_production_today_p90",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        suggested_display_precision=1,
-        level=0.9,
-        day="today",
-    ),
-    QuantileDescription(
-        key="energy_production_tomorrow_p10",
-        translation_key="energy_production_tomorrow_p10",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        suggested_display_precision=1,
-        level=0.1,
-        day="tomorrow",
-    ),
-    QuantileDescription(
-        key="energy_production_tomorrow_p90",
-        translation_key="energy_production_tomorrow_p90",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        suggested_display_precision=1,
-        level=0.9,
-        day="tomorrow",
-    ),
-)
-
-QUANTILE_KEYS: Final[frozenset[str]] = frozenset(entry.key for entry in QUANTILE_DESCRIPTIONS)
-
-
-@dataclass(frozen=True, kw_only=True)
 class ArrayDiagnosticDescription(SensorEntityDescription):
     """A per-array diagnostic, computed from the array's own forecast fields."""
 
@@ -278,19 +209,6 @@ class SiteDiagnosticDescription(SensorEntityDescription):
 
 SITE_DIAGNOSTICS: Final[tuple[SiteDiagnosticDescription, ...]] = (
     SiteDiagnosticDescription(
-        key="nowcast_share",
-        translation_key="nowcast_share",
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="%",
-        suggested_display_precision=0,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        entity_registry_enabled_default=False,
-        # How much of the next hour came from observation rather than the weather
-        # model. Zero means the satellite is unavailable or the sun is down, and
-        # the forecast is the model alone.
-        attribute="observed_share",
-    ),
-    SiteDiagnosticDescription(
         key="last_update_forecast",
         translation_key="last_update_forecast",
         device_class=SensorDeviceClass.TIMESTAMP,
@@ -298,23 +216,7 @@ SITE_DIAGNOSTICS: Final[tuple[SiteDiagnosticDescription, ...]] = (
         entity_registry_enabled_default=False,
         attribute="weather_fetched_at",
     ),
-    SiteDiagnosticDescription(
-        key="last_update_ensemble",
-        translation_key="last_update_ensemble",
-        device_class=SensorDeviceClass.TIMESTAMP,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        entity_registry_enabled_default=False,
-        attribute="ensemble_fetched_at",
-    ),
-    SiteDiagnosticDescription(
-        key="last_update_satellite",
-        translation_key="last_update_satellite",
-        device_class=SensorDeviceClass.TIMESTAMP,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        entity_registry_enabled_default=False,
-        attribute="satellite_fetched_at",
-    ),
 )
 
 SITE_DIAGNOSTIC_KEYS: Final[frozenset[str]] = frozenset(entry.key for entry in SITE_DIAGNOSTICS)
-ALL_SENSOR_KEYS: Final[frozenset[str]] = SENSOR_KEYS | QUANTILE_KEYS | DIAGNOSTIC_KEYS | SITE_DIAGNOSTIC_KEYS
+ALL_SENSOR_KEYS: Final[frozenset[str]] = SENSOR_KEYS | DIAGNOSTIC_KEYS | SITE_DIAGNOSTIC_KEYS
