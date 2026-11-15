@@ -217,14 +217,18 @@ async def test_learning_is_saved_when_home_assistant_stops(hass: Any, configured
 
 
 async def test_learning_is_saved_while_running(hass: Any, configured: Any, hass_storage: Any) -> None:
-    """The state is written periodically, not only once after setup.
+    """The state is written periodically, from the event loop, not only once after setup.
 
-    Timers are fired at explicit future instants rather than by moving a frozen
-    clock: the interval reschedules itself against the event loop's own time,
-    which a frozen clock does not advance, so that version raced on slow runners.
+    The thread check matters as much as the write: a save handler without
+    ``@callback`` is run in an executor thread, where touching the store is
+    unsafe, and whether the write then lands in time is a race the test would
+    sometimes win.
     """
     from datetime import timedelta  # noqa: PLC0415
+    import threading  # noqa: PLC0415
+    from unittest.mock import patch  # noqa: PLC0415
 
+    from homeassistant.helpers.storage import Store  # noqa: PLC0415
     from homeassistant.util import dt as dt_util  # noqa: PLC0415
     from pytest_homeassistant_custom_component.common import async_fire_time_changed  # noqa: PLC0415
 
@@ -232,8 +236,21 @@ async def test_learning_is_saved_while_running(hass: Any, configured: Any, hass_
 
     key = f"soular.learning.{configured.entry_id}"
     learner = configured.runtime_data.coordinator.learner
-    for samples in (7, 9):
-        learner.state_for("east").samples = samples
-        async_fire_time_changed(hass, dt_util.utcnow() + SAVE_INTERVAL + timedelta(seconds=1))
-        await hass.async_block_till_done()
-        assert hass_storage[key]["data"]["arrays"]["east"]["samples"] == samples
+    threads: set[int] = set()
+    delay_save = Store.async_delay_save
+
+    def spy(self: Any, *args: Any, **kwargs: Any) -> None:
+        threads.add(threading.get_ident())
+        delay_save(self, *args, **kwargs)
+
+    with patch.object(Store, "async_delay_save", spy):
+        for samples in (7, 9):
+            learner.state_for("east").samples = samples
+            async_fire_time_changed(hass, dt_util.utcnow() + SAVE_INTERVAL + timedelta(seconds=1))
+            await hass.async_block_till_done()
+            # The store writes on its own zero-delay timer, which is another tick.
+            async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
+            await hass.async_block_till_done()
+            assert hass_storage[key]["data"]["arrays"]["east"]["samples"] == samples
+
+    assert threads == {threading.get_ident()}, "saves ran off the event loop thread"

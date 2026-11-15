@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
-from homeassistant.core import Event, HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
 
 from custom_components.soular.const import CONF_BATTERY_SOC_SENSOR, CONF_POWER_SENSOR, SUBENTRY_TYPE_ARRAY
@@ -55,19 +55,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: SoularConfigEntry) -> bo
     # Saved on an interval rather than per sample, and on the way down. Home
     # Assistant does not unload entries when it stops, so the unload hook alone
     # would lose everything learned since setup on every restart.
-    # The interval writes directly rather than through the store's delayed
-    # write, whose handle can be superseded; stopping and unloading go through
-    # it because that is what guarantees the final write during shutdown.
-    def save_now(_now: object) -> None:
-        entry.async_create_task(hass, store.async_save(encode(learner.states)), "soular save learning")
-
+    #
+    # Both are @callback because the store is event-loop only: Home Assistant
+    # runs a plain function handed to a timer or the bus in an executor thread.
+    @callback
     def save(*_: object) -> None:
         store.async_delay_save(lambda: encode(learner.states), 0)
 
+    @callback
     def save_on_stop(_event: Event) -> None:
         save()
 
-    entry.async_on_unload(async_track_time_interval(hass, save_now, SAVE_INTERVAL))
+    entry.async_on_unload(async_track_time_interval(hass, save, SAVE_INTERVAL))
     entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, save_on_stop))
     entry.async_on_unload(save)
 
