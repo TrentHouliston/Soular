@@ -7,6 +7,7 @@ because the sun keeps moving even when the weather does not -- and on a shaded
 site the sun's position is most of what changes minute to minute.
 """
 
+from dataclasses import replace
 from datetime import datetime, timedelta
 import logging
 
@@ -117,8 +118,10 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
         if self.learner.last_sample_at is not None and now - self.learner.last_sample_at < LEARNING_SAMPLE_INTERVAL:
             return
 
-        geometry = solar_geometry(result.times[:1], self.system.site)
-        clearsky = clear_sky(result.times[:1], self.system.site, geometry).ghi
+        i = result.now_index
+        now_slice = slice(i, i + 1)
+        geometry = solar_geometry(result.times[now_slice], self.system.site)
+        clearsky = clear_sky(result.times[now_slice], self.system.site, geometry).ghi
         day_of_year = float(now.timetuple().tm_yday)
         capacity = {array.name: array.dc_capacity_w for array in self.system.arrays}
 
@@ -127,15 +130,15 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
             if value is None:
                 continue
             sample = ArraySample(
-                predicted_w=float(entry.dc_power_w[0]),
+                predicted_w=float(entry.dc_power_w[i]),
                 capacity_w=capacity.get(entry.name, 0.0),
-                transmittance=float(entry.transmittance[0]),
+                transmittance=float(entry.transmittance[i]),
                 elevation_deg=float(geometry.apparent_elevation[0]),
                 # Clear-sky index of the forecast at this instant, which is the
                 # same quantity the correction is applied against later.
-                clearness=float(np.nan_to_num(clear_sky_index(entry.poa_global[:1], clearsky), nan=1.0)[0]),
+                clearness=float(np.nan_to_num(clear_sky_index(entry.poa_global[now_slice], clearsky), nan=1.0)[0]),
                 day_of_year=day_of_year,
-                temperature_c=float(entry.cell_temperature[0]),
+                temperature_c=float(entry.cell_temperature[i]),
             )
             self.learner.observe(entry.name, sample, value, soc)
 
@@ -186,6 +189,7 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
             arrays=tuple(corrected),
             ac_power_w=scaled,
             clearsky=result.clearsky,
+            now_index=result.now_index,
         )
 
     def _compute(
@@ -196,7 +200,10 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
     ) -> ForecastResult:
         """Run the model. Blocking; called in an executor."""
         start = np.datetime64(int(dt_util.utcnow().timestamp() // 300 * 300), "s")
-        grid = build_time_grid(start)
+        # From local midnight, so the daily totals and the energy dashboard
+        # describe the whole of today rather than only what is left of it.
+        midnight = dt_util.start_of_local_day()
+        grid = build_time_grid(start, history_start=np.datetime64(int(midnight.timestamp()), "s"))
         series = weather_from_hourly(
             hourly_times=weather.times,
             grid=grid,
@@ -208,6 +215,7 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
             diffuse=weather.diffuse,
         )
         result = forecast(self.system, grid, series)
+        result = replace(result, now_index=int(np.searchsorted(grid.times, start)))
 
         if measured:
             self._learn(result, measured, soc)

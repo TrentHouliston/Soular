@@ -36,6 +36,7 @@ REQUEST_TIMEOUT = ClientTimeout(total=30)
 # Two days of forecast plus a day of slack, so the 48-hour horizon is always
 # covered even when a run is late.
 FORECAST_DAYS = 3
+PAST_DAYS = 1
 
 
 class OpenMeteoError(Exception):
@@ -77,6 +78,9 @@ async def fetch(
         "longitude": f"{longitude:.6f}",
         "hourly": ",".join(HOURLY_VARIABLES),
         "forecast_days": str(FORECAST_DAYS),
+        # The forecast covers today from local midnight, which can be most of a
+        # day before the UTC midnight the forecast days start at.
+        "past_days": str(PAST_DAYS),
         "timezone": "UTC",
         # The default is km/h. Feeding that to a convective cooling model would
         # over-cool the array by a factor of 3.6.

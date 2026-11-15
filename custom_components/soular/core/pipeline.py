@@ -92,6 +92,10 @@ class ForecastResult:
     arrays: tuple[ArrayForecast, ...]
     ac_power_w: FloatArray
     clearsky: ClearSky
+    # Index of the present instant. Points before it are the elapsed part of
+    # today, kept so "energy today" and the energy dashboard cover the whole day;
+    # the published forecast and the learner start here.
+    now_index: int = 0
 
     def array(self, name: str) -> ArrayForecast:
         """Look up one array's forecast by name."""
@@ -107,23 +111,35 @@ def build_time_grid(
     *,
     horizon_hours: int = DEFAULT_HORIZON_HOURS,
     near_term_hours: int = NEAR_TERM_HOURS,
+    history_start: np.datetime64 | None = None,
 ) -> TimeGrid:
     """Build the standard mixed-resolution grid: fine near-term, coarse beyond.
 
     The horizon is a whole number of hours starting at ``start`` because haeo pads
     a forecast series to whole days by wrapping its head onto its tail. A series
     that stops mid-day gets this morning spliced onto its end.
+
+    ``history_start`` prepends coarse points from that instant up to ``start``,
+    so the elapsed part of a day can be integrated too. Their count is the index
+    of ``start`` in the result.
     """
     origin = start.astype("datetime64[s]")
+    coarse = np.timedelta64(FAR_TERM_STEP_MINUTES * 60, "s")
+    past = (
+        np.arange(history_start.astype("datetime64[s]"), origin, coarse).astype("datetime64[s]")
+        if history_start is not None
+        else np.array([], dtype="datetime64[s]")
+    )
     near_end = origin + np.timedelta64(near_term_hours * 3600, "s")
     far_end = origin + np.timedelta64(horizon_hours * 3600, "s")
 
     near = np.arange(origin, near_end, np.timedelta64(NEAR_TERM_STEP_MINUTES * 60, "s")).astype("datetime64[s]")
     far = np.arange(near_end, far_end, np.timedelta64(FAR_TERM_STEP_MINUTES * 60, "s")).astype("datetime64[s]")
-    times = np.concatenate([near, far])
+    times = np.concatenate([past, near, far])
 
     steps = np.concatenate(
         [
+            np.full(past.size, FAR_TERM_STEP_MINUTES * 60.0),
             np.full(near.size, NEAR_TERM_STEP_MINUTES * 60.0),
             np.full(far.size, FAR_TERM_STEP_MINUTES * 60.0),
         ]

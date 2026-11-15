@@ -125,6 +125,10 @@ class SoularForecastSensor(SoularSensorBase):
         if series is None:
             return None
         times, power = series
+        # From now: haeo reads interval zero as the present, and wants exactly
+        # the 48-hour horizon, not the elapsed part of today.
+        start = self.coordinator.data.now_index
+        times, power = times[start:], power[start:]
 
         points = [
             {
