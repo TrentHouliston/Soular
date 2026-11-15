@@ -236,7 +236,4 @@ async def test_learning_is_saved_while_running(hass: Any, configured: Any, hass_
         learner.state_for("east").samples = samples
         async_fire_time_changed(hass, dt_util.utcnow() + SAVE_INTERVAL + timedelta(seconds=1))
         await hass.async_block_till_done()
-        # The save is scheduled with no delay, which is its own timer tick.
-        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
-        await hass.async_block_till_done()
         assert hass_storage[key]["data"]["arrays"]["east"]["samples"] == samples
