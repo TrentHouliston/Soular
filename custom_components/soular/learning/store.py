@@ -12,6 +12,7 @@ against a basis they were not fitted to, so a mismatch discards the state and
 starts again rather than reinterpreting numbers that no longer mean anything.
 """
 
+from datetime import timedelta
 from typing import Any, TypedDict
 
 from homeassistant.core import HomeAssistant
@@ -25,8 +26,8 @@ STORAGE_VERSION = 1
 STORAGE_MINOR_VERSION = 1
 
 # Saving on every sample would write to disk every five minutes for no benefit;
-# losing a few minutes of learning to a hard restart costs nothing measurable.
-SAVE_DELAY_SECONDS = 300
+# losing a quarter of an hour of learning to a crash costs nothing measurable.
+SAVE_INTERVAL = timedelta(minutes=15)
 
 
 class ArrayStateDict(TypedDict):
