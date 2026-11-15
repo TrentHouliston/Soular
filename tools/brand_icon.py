@@ -1,4 +1,4 @@
-"""Render Soular's brand icon: a soul of sunlight striking a solar panel.
+"""Render Soular's brand icon and logo: a soul of sunlight striking a solar panel.
 
 A white-hot sun trailing a tail of flame comes down onto a tilted panel, and
 its light splashes across the cells in a crown of sparks. Procedural, so it can
@@ -6,10 +6,11 @@ be regenerated or tweaked rather than hand-edited:
 
     uv run python -m tools.brand_icon
 
-writes ``icon.png``/``icon@2x.png`` (for light themes: deeper amber, more
-opaque, so it holds up on white) and ``dark_icon.png``/``dark_icon@2x.png``
-(the luminous version) into ``custom_components/soular/brand/``, which Home
-Assistant 2026.8+ serves for custom integrations directly.
+writes the icon -- ``icon.png`` (for light themes: deeper amber, more opaque,
+so it holds up on white) and ``dark_icon.png`` (the luminous version) -- and the
+wordmark logo, its o the soul, as ``logo.png`` and ``dark_logo.png``, each at 1x
+and 2x, into ``custom_components/soular/brand/``. Home Assistant 2026.8+ serves
+those for custom integrations directly.
 """
 
 import argparse
@@ -33,6 +34,10 @@ IMPACT_UV = (0.46, 0.36)
 HEADING = np.array([-0.45, 1.0])
 # How much larger than its unit design the soul is drawn.
 SOUL_SCALE = 1.45
+# In the logo the tail leans back to the left, over the s, by this many degrees.
+LOGO_TAIL_LEAN_DEG = 50.0
+TEXT_LIGHT_THEME = (22, 42, 82)
+TEXT_DARK_THEME = (238, 242, 248)
 
 
 @dataclass(frozen=True)
@@ -166,12 +171,20 @@ def panel_point_grid(u: np.ndarray, v: np.ndarray) -> np.ndarray:
     return far + (near - far) * v
 
 
-def soul(x: np.ndarray, y: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """Draw the soul in its own frame: head at the origin, tail streaming up (negative y)."""
-    n = x.shape[0]
-    sway_field = fbm((n, n), rng, base=2)
-    lick = fbm((n, n), rng, base=5, octaves=5)
-    flicker = fbm((n, n), rng, base=9, octaves=3)
+def soul(
+    x: np.ndarray, y: np.ndarray, rng: np.random.Generator, tail_length: float = 1.0, glow_weight: float = 0.55
+) -> np.ndarray:
+    """Draw the soul in its own frame: head at the origin, tail streaming up (negative y).
+
+    ``tail_length`` scales the tail without changing the head; ``glow_weight``
+    sets how far its soft glow spills.
+    """
+    shape = (x.shape[0], x.shape[1])
+    sway_field = fbm(shape, rng, base=2)
+    lick = fbm(shape, rng, base=5, octaves=5)
+    flicker = fbm(shape, rng, base=9, octaves=3)
+    head_y = y
+    y = y / tail_length
 
     def tongue(offset: float, top: float, bottom: float, girth: float, lean: float) -> np.ndarray:
         t = np.clip((bottom - y) / (bottom - top), 0.0, 1.0)
@@ -203,10 +216,20 @@ def soul(x: np.ndarray, y: np.ndarray, rng: np.random.Generator) -> np.ndarray:
             * rng.uniform(0.3, 0.7)
         )
 
-    r = np.sqrt(x**2 + y**2)
+    r = np.sqrt(x**2 + head_y**2)
     head = np.exp(-((r / 0.11) ** 4)) * 1.0 + np.exp(-((r / 0.06) ** 2)) * 0.6
     glow = np.exp(-((r / 0.22) ** 2))
-    return tail * 0.80 + heart * 0.85 + streaks + head * 1.2 + glow * 0.55
+    return tail * 0.80 + heart * 0.85 + streaks + head * 1.2 + glow * glow_weight
+
+
+def colourise(light: np.ndarray, palette: Palette) -> tuple[np.ndarray, np.ndarray]:
+    """Turn light intensity into colour and coverage, hotter towards white."""
+    level = np.clip(light, 0, 1.5) / 1.5
+    alpha = np.clip(light * palette.alpha_gain, 0, 1) ** 0.85
+    positions = np.array([stop[0] for stop in palette.light])
+    colours = np.array([stop[1] for stop in palette.light], dtype=np.float64) / 255.0
+    rgb = np.stack([np.interp(level**0.7, positions, colours[:, c]) for c in range(3)], axis=-1)
+    return rgb, alpha
 
 
 def render(size: int, palette: Palette) -> Image.Image:
@@ -265,11 +288,7 @@ def render(size: int, palette: Palette) -> Image.Image:
     light *= 1 - smoothstep(0.86, 0.99, np.maximum(np.abs(x), np.abs(y)))
     light = np.clip(light, 0, None)
 
-    level = np.clip(light, 0, 1.5) / 1.5
-    light_alpha = np.clip(light * palette.alpha_gain, 0, 1) ** 0.85
-    positions = np.array([stop[0] for stop in palette.light])
-    colours = np.array([stop[1] for stop in palette.light], dtype=np.float64) / 255.0
-    light_rgb = np.stack([np.interp(level**0.7, positions, colours[:, c]) for c in range(3)], axis=-1)
+    light_rgb, light_alpha = colourise(light, palette)
 
     # Light over the panel: screen-blend where there is panel, plain light elsewhere.
     screen = 1 - (1 - panel_rgb) * (1 - light_rgb * light_alpha[..., None])
@@ -279,8 +298,82 @@ def render(size: int, palette: Palette) -> Image.Image:
     return Image.fromarray(rgba, "RGBA").resize((size, size), Image.Resampling.LANCZOS)
 
 
+def render_logo(height: int, palette: Palette, text_colour: tuple[int, int, int]) -> Image.Image:
+    """Render the wordmark "soular", its o the glowing soul, ``height`` pixels tall.
+
+    The soul's head takes the o's place and size; its tail streams up and back
+    to the left, over the short s and clear of the tall l.
+    """
+    from matplotlib import font_manager  # noqa: PLC0415
+    from PIL import ImageFont  # noqa: PLC0415
+
+    rng = np.random.default_rng(SEED)
+    font_path = font_manager.findfont(font_manager.FontProperties(family="DejaVu Sans", weight="bold"))
+    font_size = 160 * SUPERSAMPLE
+    font = ImageFont.truetype(font_path, font_size)
+
+    # Layout, relative to the baseline at the s's origin.
+    o_left = font.getlength("s")
+    ular_x = font.getlength("so")
+    o_box = font.getbbox("o", anchor="ls")
+    ular_box = font.getbbox("ular", anchor="ls")
+    radius = (o_box[3] - o_box[1]) / 2
+    centre = (o_left + (o_box[0] + o_box[2]) / 2, (o_box[1] + o_box[3]) / 2)
+    unit = radius / 0.17  # pixels per soul unit: the head fills the o's counter
+    tail_length = 1.05
+    lean = np.radians(LOGO_TAIL_LEAN_DEG)
+    reach = (tail_length * 1.0 + 0.1) * unit
+    tip = (centre[0] - np.sin(lean) * reach, centre[1] - np.cos(lean) * reach)
+
+    pad = 0.30 * unit
+    left = min(0.0, tip[0] - pad)
+    top = min(float(ular_box[1]), tip[1] - pad)
+    right = ular_x + ular_box[2] + pad * 0.4
+    bottom = max(float(ular_box[3]), centre[1] + radius) + pad * 0.6
+    width_px, height_px = int(np.ceil(right - left)), int(np.ceil(bottom - top))
+    origin = (-left, -top)  # where the baseline origin lands on the canvas
+
+    text = Image.new("L", (width_px, height_px), 0)
+    draw = ImageDraw.Draw(text)
+    draw.text(origin, "s", font=font, fill=255, anchor="ls")
+    draw.text((origin[0] + ular_x, origin[1]), "ular", font=font, fill=255, anchor="ls")
+    text_alpha = np.asarray(text, dtype=np.float64) / 255.0
+    # The o itself, drawn in light, so it still reads as a letter around the soul.
+    o_glyph = Image.new("L", (width_px, height_px), 0)
+    ImageDraw.Draw(o_glyph).text((origin[0] + o_left, origin[1]), "o", font=font, fill=255, anchor="ls")
+    o_alpha = np.asarray(o_glyph, dtype=np.float64) / 255.0
+
+    y, x = np.mgrid[0:height_px, 0:width_px].astype(np.float64)
+    dx, dy = x - (origin[0] + centre[0]), y - (origin[1] + centre[1])
+    # Into the soul's frame: its tail runs up the negative local y axis.
+    local_y = (dx * np.sin(lean) + dy * np.cos(lean)) / unit
+    local_x = (dx * np.cos(lean) - dy * np.sin(lean)) / unit
+    light = soul(local_x, local_y, rng, tail_length=tail_length, glow_weight=0.25)
+    light += o_alpha * 0.75
+
+    # A few embers shed from the tail.
+    for _ in range(6):
+        along = rng.uniform(0.25, 0.85) * tail_length
+        aside = rng.normal(0.0, 0.16)
+        r = rng.uniform(0.012, 0.022)
+        light += rng.uniform(0.5, 0.9) * np.exp(-(((local_x - aside) ** 2 + (local_y + along) ** 2) / r**2))
+    # Fade before the canvas edge, so nothing is cut off.
+    edge = np.minimum.reduce([x, y, width_px - 1 - x, height_px - 1 - y]) / (0.12 * unit)
+    light = np.clip(light * smoothstep(0.0, 1.0, edge), 0, None)
+
+    light_rgb, light_alpha = colourise(light, palette)
+    text_rgb = np.array(text_colour, dtype=np.float64) / 255.0
+    alpha = light_alpha + text_alpha * (1 - light_alpha)
+    rgb = (light_rgb * light_alpha[..., None] + text_rgb * (text_alpha * (1 - light_alpha))[..., None]) / np.maximum(
+        alpha, 1e-6
+    )[..., None]
+    rgba = np.dstack([rgb * 255, alpha * 255]).clip(0, 255).astype(np.uint8)
+    width = round(height * width_px / height_px)
+    return Image.fromarray(rgba, "RGBA").resize((width, height), Image.Resampling.LANCZOS)
+
+
 def main() -> None:
-    """Write the four icon variants."""
+    """Write the icon and logo variants."""
     parser = argparse.ArgumentParser(description="Render Soular's brand icons.")
     parser.add_argument("--out", type=Path, default=OUT)
     args = parser.parse_args()
@@ -289,6 +382,12 @@ def main() -> None:
         for suffix, size in (("", 256), ("@2x", 512)):
             path = args.out / f"{prefix}icon{suffix}.png"
             render(size, palette).save(path, optimize=True)
+            print(f"wrote {path}")
+    # Home Assistant wants a logo's shortest side between 128 and 256 pixels.
+    for prefix, palette, text in (("", LIGHT, TEXT_LIGHT_THEME), ("dark_", DARK, TEXT_DARK_THEME)):
+        for suffix, height in (("", 128), ("@2x", 256)):
+            path = args.out / f"{prefix}logo{suffix}.png"
+            render_logo(height, palette, text).save(path, optimize=True)
             print(f"wrote {path}")
 
 
