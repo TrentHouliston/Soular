@@ -192,9 +192,7 @@ def test_the_feature_width_matches_the_declared_basis() -> None:
     assert features.shape == (1, FEATURE_COUNT)
 
 
-async def test_learning_is_saved_when_home_assistant_stops(
-    hass: Any, configured: Any, hass_storage: Any, freezer: Any
-) -> None:
+async def test_learning_is_saved_when_home_assistant_stops(hass: Any, configured: Any, hass_storage: Any) -> None:
     """Stopping Home Assistant writes the learned state.
 
     Entries are not unloaded on shutdown, so an unload hook alone loses
@@ -203,12 +201,12 @@ async def test_learning_is_saved_when_home_assistant_stops(
     from datetime import timedelta  # noqa: PLC0415
 
     from homeassistant.const import EVENT_HOMEASSISTANT_STOP  # noqa: PLC0415
+    from homeassistant.util import dt as dt_util  # noqa: PLC0415
     from pytest_homeassistant_custom_component.common import async_fire_time_changed  # noqa: PLC0415
 
     key = f"soular.learning.{configured.entry_id}"
     # Let any save scheduled at setup happen, so the one at stop is what counts.
-    freezer.tick(timedelta(minutes=10))
-    async_fire_time_changed(hass)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=10))
     await hass.async_block_till_done()
     configured.runtime_data.coordinator.learner.state_for("east").samples = 42
     hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
@@ -218,10 +216,16 @@ async def test_learning_is_saved_when_home_assistant_stops(
     assert hass_storage[key]["data"]["arrays"]["east"]["samples"] == 42
 
 
-async def test_learning_is_saved_while_running(hass: Any, configured: Any, hass_storage: Any, freezer: Any) -> None:
-    """The state is written periodically, not only once after setup."""
+async def test_learning_is_saved_while_running(hass: Any, configured: Any, hass_storage: Any) -> None:
+    """The state is written periodically, not only once after setup.
+
+    Timers are fired at explicit future instants rather than by moving a frozen
+    clock: the interval reschedules itself against the event loop's own time,
+    which a frozen clock does not advance, so that version raced on slow runners.
+    """
     from datetime import timedelta  # noqa: PLC0415
 
+    from homeassistant.util import dt as dt_util  # noqa: PLC0415
     from pytest_homeassistant_custom_component.common import async_fire_time_changed  # noqa: PLC0415
 
     from custom_components.soular.learning.store import SAVE_INTERVAL  # noqa: PLC0415
@@ -230,10 +234,9 @@ async def test_learning_is_saved_while_running(hass: Any, configured: Any, hass_
     learner = configured.runtime_data.coordinator.learner
     for samples in (7, 9):
         learner.state_for("east").samples = samples
-        freezer.tick(SAVE_INTERVAL + timedelta(seconds=1))
-        async_fire_time_changed(hass)
+        async_fire_time_changed(hass, dt_util.utcnow() + SAVE_INTERVAL + timedelta(seconds=1))
         await hass.async_block_till_done()
         # The save is scheduled with no delay, which is its own timer tick.
-        async_fire_time_changed(hass)
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
         await hass.async_block_till_done()
         assert hass_storage[key]["data"]["arrays"]["east"]["samples"] == samples
