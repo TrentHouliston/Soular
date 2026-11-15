@@ -117,7 +117,7 @@ def replay(
         diffuse=weather.diffuse,
     )
     result = forecast(system, grid, series)
-    samples = samples_from(result, system, np.arange(times.size))
+    samples = samples_from(result, system, series.ghi, np.arange(times.size))
 
     offered = 0
     for k, start in enumerate(starts.tolist()):

@@ -18,7 +18,13 @@ from homeassistant.util import dt as dt_util
 import numpy as np
 
 from custom_components.soular.const import DOMAIN, LEARNING_SAMPLE_INTERVAL, RECOMPUTE_INTERVAL, UPDATE_INTERVAL
-from custom_components.soular.coordinator.actuals import Learner, read_percentage, read_power, samples_from
+from custom_components.soular.coordinator.actuals import (
+    Learner,
+    forecast_clearness,
+    read_percentage,
+    read_power,
+    samples_from,
+)
 from custom_components.soular.coordinator.backfill import (
     BACKFILL_DAYS,
     arrays_to_backfill,
@@ -26,7 +32,6 @@ from custom_components.soular.coordinator.backfill import (
     backfill_window,
     replay,
 )
-from custom_components.soular.core.clearsky import clear_sky, clear_sky_index
 from custom_components.soular.core.correction import build_features
 from custom_components.soular.core.geometry import solar_geometry
 from custom_components.soular.core.nwp import weather_from_hourly
@@ -159,13 +164,15 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
             ", ".join(sorted(arrays)),
         )
 
-    def _learn(self, result: ForecastResult, measured: dict[str, float | None], soc: float | None) -> None:
+    def _learn(
+        self, result: ForecastResult, ghi: np.ndarray, measured: dict[str, float | None], soc: float | None
+    ) -> None:
         """Fold the present instant's measured output into the correction."""
         now = dt_util.utcnow()
         if self.learner.last_sample_at is not None and now - self.learner.last_sample_at < LEARNING_SAMPLE_INTERVAL:
             return
 
-        samples = samples_from(result, self.system, np.array([result.now_index]))
+        samples = samples_from(result, self.system, ghi, np.array([result.now_index]))
         for name, (sample,) in samples.items():
             value = measured.get(name)
             if value is not None:
@@ -247,9 +254,6 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
         result = replace(result, now_index=int(np.searchsorted(grid.times, start)))
 
         if measured:
-            self._learn(result, measured, soc)
+            self._learn(result, series.ghi, measured, soc)
 
-        geometry = solar_geometry(grid.times, self.system.site)
-        clearsky = clear_sky(grid.times, self.system.site, geometry).ghi
-        clearness = np.nan_to_num(clear_sky_index(series.ghi, clearsky), nan=1.0)
-        return self._correct(result, clearness)
+        return self._correct(result, forecast_clearness(grid.times, self.system, series.ghi))

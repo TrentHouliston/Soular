@@ -82,7 +82,7 @@ def test_a_week_of_history_calibrates_the_array() -> None:
         diffuse=weather.diffuse,
     )
     result = forecast(SYSTEM, grid, series)
-    samples = samples_from(result, SYSTEM, np.arange(times.size))["east"]
+    samples = samples_from(result, SYSTEM, series.ghi, np.arange(times.size))["east"]
     features = build_features(
         elevation_deg=np.array([s.elevation_deg for s in samples]),
         clearness=np.array([s.clearness for s in samples]),

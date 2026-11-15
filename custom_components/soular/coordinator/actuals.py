@@ -43,23 +43,36 @@ class ArraySample:
     temperature_c: float
 
 
-def samples_from(result: ForecastResult, system: SystemSpec, index: np.ndarray) -> dict[str, list[ArraySample]]:
+def forecast_clearness(times: np.ndarray, system: SystemSpec, ghi: np.ndarray) -> np.ndarray:
+    """Return the clearness feature: the forecast's horizontal clear-sky index.
+
+    The one definition the correction is both trained and applied with. It is
+    deliberately horizontal: the plane-of-array index on a tilted plane also
+    varies with sun position and orientation, and training on that while
+    applying the horizontal one taught each array a different, geometry-shaped
+    cloud response.
+    """
+    clearsky = clear_sky(times, system.site, solar_geometry(times, system.site)).ghi
+    return np.nan_to_num(clear_sky_index(ghi, clearsky), nan=1.0)
+
+
+def samples_from(
+    result: ForecastResult, system: SystemSpec, ghi: np.ndarray, index: np.ndarray
+) -> dict[str, list[ArraySample]]:
     """Build the learner's view of each array at the given points of a forecast.
 
-    Shared by live sampling and the recorder backfill, so the two cannot drift
-    into training the correction on different features.
+    ``ghi`` is the forecast's horizontal irradiance on the result's grid. Shared
+    by live sampling and the recorder backfill, so the two cannot drift into
+    training the correction on different features.
     """
     times = result.times[index]
     geometry = solar_geometry(times, system.site)
-    clearsky = clear_sky(times, system.site, geometry).ghi
+    clearness = forecast_clearness(times, system, ghi[index])
     days = (times.astype("datetime64[D]") - times.astype("datetime64[Y]").astype("datetime64[D]")).astype(np.int64) + 1
     capacity = {array.name: array.dc_capacity_w for array in system.arrays}
 
     out: dict[str, list[ArraySample]] = {}
     for entry in result.arrays:
-        # Clear-sky index of the forecast at each instant, which is the same
-        # quantity the correction is applied against later.
-        clearness = np.nan_to_num(clear_sky_index(entry.poa_global[index], clearsky), nan=1.0)
         out[entry.name] = [
             ArraySample(
                 predicted_w=float(entry.dc_power_w[i]),
