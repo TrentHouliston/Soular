@@ -18,7 +18,14 @@ from homeassistant.util import dt as dt_util
 import numpy as np
 
 from custom_components.soular.const import DOMAIN, LEARNING_SAMPLE_INTERVAL, RECOMPUTE_INTERVAL, UPDATE_INTERVAL
-from custom_components.soular.coordinator.actuals import ArraySample, Learner, read_percentage, read_power
+from custom_components.soular.coordinator.actuals import Learner, read_percentage, read_power, samples_from
+from custom_components.soular.coordinator.backfill import (
+    BACKFILL_DAYS,
+    arrays_to_backfill,
+    async_read_history,
+    backfill_window,
+    replay,
+)
 from custom_components.soular.core.clearsky import clear_sky, clear_sky_index
 from custom_components.soular.core.correction import build_features
 from custom_components.soular.core.geometry import solar_geometry
@@ -55,6 +62,7 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
         self._weather: HourlyWeather | None = None
         self._weather_at: datetime | None = None
         self._weather_error: str | None = None
+        self._backfilled = False
 
     @property
     def weather_fetched_at(self) -> datetime | None:
@@ -81,6 +89,10 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
                 f"weather is {age.total_seconds() / 3600:.1f} hours old; {self._weather_error or 'source unavailable'}"
             )
             raise UpdateFailed(msg)
+
+        if not self._backfilled:
+            self._backfilled = True
+            await self._async_backfill()
 
         # Read measured output before recomputing, so the correction applied to
         # this forecast reflects everything known up to now and nothing after.
@@ -112,35 +124,52 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
             self._weather_at = now
             self._weather_error = None
 
+    async def _async_backfill(self) -> None:
+        """Catch arrays with nothing learned up from the recorder, once.
+
+        A head start, never a requirement: any failure leaves the learner to
+        sample live state as it would have anyway.
+        """
+        arrays = arrays_to_backfill(self.learner, self.power_sensors)
+        if not arrays:
+            return
+        try:
+            start, end = backfill_window(dt_util.utcnow())
+            entities = set(arrays.values()) | ({self.soc_sensor} if self.soc_sensor else set())
+            history = await async_read_history(self.hass, entities, start, end)
+            if not any(history.get(entity) for entity in arrays.values()):
+                return
+            weather = await fetch(
+                async_get_clientsession(self.hass),
+                self.system.site.latitude,
+                self.system.site.longitude,
+                past_days=BACKFILL_DAYS + 1,
+                forecast_days=1,
+            )
+            soc = history.get(self.soc_sensor) if self.soc_sensor else None
+            offered = await self.hass.async_add_executor_job(
+                replay, self.learner, self.system, weather, arrays, history, soc
+            )
+        except Exception:  # a failed head start must not fail setup
+            _LOGGER.warning("Could not learn from recorded history; learning from live output only", exc_info=True)
+            return
+        _LOGGER.info(
+            "Learned from %d recorded samples for %s",
+            offered,
+            ", ".join(sorted(arrays)),
+        )
+
     def _learn(self, result: ForecastResult, measured: dict[str, float | None], soc: float | None) -> None:
         """Fold the present instant's measured output into the correction."""
         now = dt_util.utcnow()
         if self.learner.last_sample_at is not None and now - self.learner.last_sample_at < LEARNING_SAMPLE_INTERVAL:
             return
 
-        i = result.now_index
-        now_slice = slice(i, i + 1)
-        geometry = solar_geometry(result.times[now_slice], self.system.site)
-        clearsky = clear_sky(result.times[now_slice], self.system.site, geometry).ghi
-        day_of_year = float(now.timetuple().tm_yday)
-        capacity = {array.name: array.dc_capacity_w for array in self.system.arrays}
-
-        for entry in result.arrays:
-            value = measured.get(entry.name)
-            if value is None:
-                continue
-            sample = ArraySample(
-                predicted_w=float(entry.dc_power_w[i]),
-                capacity_w=capacity.get(entry.name, 0.0),
-                transmittance=float(entry.transmittance[i]),
-                elevation_deg=float(geometry.apparent_elevation[0]),
-                # Clear-sky index of the forecast at this instant, which is the
-                # same quantity the correction is applied against later.
-                clearness=float(np.nan_to_num(clear_sky_index(entry.poa_global[now_slice], clearsky), nan=1.0)[0]),
-                day_of_year=day_of_year,
-                temperature_c=float(entry.cell_temperature[i]),
-            )
-            self.learner.observe(entry.name, sample, value, soc)
+        samples = samples_from(result, self.system, np.array([result.now_index]))
+        for name, (sample,) in samples.items():
+            value = measured.get(name)
+            if value is not None:
+                self.learner.observe(name, sample, value, soc)
 
     def _correct(self, result: ForecastResult, clearness: np.ndarray) -> ForecastResult:
         """Apply the learned correction to every array, and to the site total."""

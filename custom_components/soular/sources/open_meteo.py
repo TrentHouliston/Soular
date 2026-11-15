@@ -71,16 +71,18 @@ async def fetch(
     longitude: float,
     *,
     model: str | None = None,
+    past_days: int = PAST_DAYS,
+    forecast_days: int = FORECAST_DAYS,
 ) -> HourlyWeather:
-    """Fetch the hourly forecast for a site."""
+    """Fetch the hourly forecast for a site, with ``past_days`` of history before today."""
     params: dict[str, str] = {
         "latitude": f"{latitude:.6f}",
         "longitude": f"{longitude:.6f}",
         "hourly": ",".join(HOURLY_VARIABLES),
-        "forecast_days": str(FORECAST_DAYS),
+        "forecast_days": str(forecast_days),
         # The forecast covers today from local midnight, which can be most of a
         # day before the UTC midnight the forecast days start at.
-        "past_days": str(PAST_DAYS),
+        "past_days": str(past_days),
         "timezone": "UTC",
         # The default is km/h. Feeding that to a convective cooling model would
         # over-cool the array by a factor of 3.6.

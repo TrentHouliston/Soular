@@ -73,10 +73,8 @@ Everything described above is built and tested. It has not yet been through a
 tagged release or a HACS submission, and every measured number on this page comes
 from one site.
 
-Known gaps, listed because they are the ones a user would notice: the learner
-starts cold rather than warm-starting from the recorder, so a fresh install
-spends about a week reaching its calibration, and there are no skill diagnostics
-reporting the forecast's own error against a baseline.
+Known gap, listed because it is one a user would notice: there are no skill
+diagnostics reporting the forecast's own error against a baseline.
 
 ## Installation
 
