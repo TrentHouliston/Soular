@@ -190,3 +190,67 @@ def test_the_feature_width_matches_the_declared_basis() -> None:
         temperature_c=np.array([25.0]),
     )
     assert features.shape == (1, FEATURE_COUNT)
+
+
+async def test_learning_is_saved_when_home_assistant_stops(hass: Any, configured: Any, hass_storage: Any) -> None:
+    """Stopping Home Assistant writes the learned state.
+
+    Entries are not unloaded on shutdown, so an unload hook alone loses
+    everything learned since the last write on every restart.
+    """
+    from datetime import timedelta  # noqa: PLC0415
+
+    from homeassistant.const import EVENT_HOMEASSISTANT_STOP  # noqa: PLC0415
+    from homeassistant.util import dt as dt_util  # noqa: PLC0415
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed  # noqa: PLC0415
+
+    key = f"soular.learning.{configured.entry_id}"
+    # Let any save scheduled at setup happen, so the one at stop is what counts.
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=10))
+    await hass.async_block_till_done()
+    configured.runtime_data.coordinator.learner.state_for("east").samples = 42
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+    await hass.async_block_till_done()
+    # The write itself happens at the final-write stage, or here immediately.
+    await hass.async_stop(force=True)
+    assert hass_storage[key]["data"]["arrays"]["east"]["samples"] == 42
+
+
+async def test_learning_is_saved_while_running(hass: Any, configured: Any, hass_storage: Any) -> None:
+    """The state is written periodically, from the event loop, not only once after setup.
+
+    The thread check matters as much as the write: a save handler without
+    ``@callback`` is run in an executor thread, where touching the store is
+    unsafe, and whether the write then lands in time is a race the test would
+    sometimes win.
+    """
+    from datetime import timedelta  # noqa: PLC0415
+    import threading  # noqa: PLC0415
+    from unittest.mock import patch  # noqa: PLC0415
+
+    from homeassistant.helpers.storage import Store  # noqa: PLC0415
+    from homeassistant.util import dt as dt_util  # noqa: PLC0415
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed  # noqa: PLC0415
+
+    from custom_components.soular.learning.store import SAVE_INTERVAL  # noqa: PLC0415
+
+    key = f"soular.learning.{configured.entry_id}"
+    learner = configured.runtime_data.coordinator.learner
+    threads: set[int] = set()
+    delay_save = Store.async_delay_save
+
+    def spy(self: Any, *args: Any, **kwargs: Any) -> None:
+        threads.add(threading.get_ident())
+        delay_save(self, *args, **kwargs)
+
+    with patch.object(Store, "async_delay_save", spy):
+        for samples in (7, 9):
+            learner.state_for("east").samples = samples
+            async_fire_time_changed(hass, dt_util.utcnow() + SAVE_INTERVAL + timedelta(seconds=1))
+            await hass.async_block_till_done()
+            # The store writes on its own zero-delay timer, which is another tick.
+            async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
+            await hass.async_block_till_done()
+            assert hass_storage[key]["data"]["arrays"]["east"]["samples"] == samples
+
+    assert threads == {threading.get_ident()}, "saves ran off the event loop thread"

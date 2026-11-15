@@ -59,6 +59,13 @@ the uncalibrated physics over-predicts by about 6%, which is typical. Because
 the fit forgets exponentially over about thirty days of daylight, it tracks
 soiling, pruning and panel degradation rather than freezing a number.
 
+You do not have to wait for it. When an array has learned nothing yet — a
+fresh install, or a newly added array — Soular replays the last week of that
+sensor's history from the recorder against the weather for the same days, so
+the correction is in place from the first forecast. This needs the sensor to
+have recorder statistics (a `state_class` of `measurement`, which inverter power
+sensors almost always have), and happens once, not on every restart.
+
 Without it the array runs on physics alone. That still works — it is what every
 other solar forecast integration does — but the first thing to check when the
 numbers look consistently high is whether this field is set.
@@ -133,10 +140,13 @@ served for hours after the source has gone.
 
 ## When it looks wrong
 
-**Consistently high, especially in the first week.** Expected. The correction
-ramps in over roughly its first 500 samples so a fresh install is pure physics,
-and physics over-predicts. Check the **Learned correction** diagnostic on each
-array: it starts at 100% and should settle somewhere near 90–95%.
+**Consistently high, especially in the first week.** The correction ramps in
+over roughly its first 500 samples, and physics alone over-predicts. A fresh
+install normally skips this by learning from the recorder's last week; if the
+**Learning samples** diagnostic is near zero after setup, the power sensor had
+no recorded statistics to learn from and the correction is building up live
+instead. Check the **Learned correction** diagnostic on each array: it should
+settle somewhere near 90–95%.
 
 **The correction is pinned at 75% or 130%.** Those are the clamps, and hitting
 one means something structural is wrong rather than that the array is that

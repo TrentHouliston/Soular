@@ -5,6 +5,7 @@ deliberate: an earlier version of this suite passed completely against a
 forecast that was identically zero, because every assertion was structural.
 """
 
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import patch
 
@@ -19,7 +20,7 @@ from custom_components.soular import async_setup_entry
 from custom_components.soular.const import CONF_ALBEDO, CONF_INVERTER_AC_LIMIT, DOMAIN
 from custom_components.soular.diagnostics import async_get_config_entry_diagnostics
 from custom_components.soular.energy import async_get_solar_forecast
-from tests.integration.conftest import ARRAY_DATA, build_entry
+from tests.integration.conftest import ARRAY_DATA, build_entry, synthetic_weather
 
 
 def state_of(hass: HomeAssistant, entity_id: str) -> str:
@@ -32,6 +33,9 @@ def state_of(hass: HomeAssistant, entity_id: str) -> str:
 SITE_POWER = "sensor.morisset_park_estimated_power_production_now"
 SITE_TOMORROW = "sensor.morisset_park_estimated_energy_production_tomorrow"
 SITE_PEAK_TOMORROW = "sensor.morisset_park_highest_power_peak_time_tomorrow"
+SITE_TODAY = "sensor.morisset_park_estimated_energy_production_today"
+SITE_REMAINING = "sensor.morisset_park_estimated_energy_production_remaining_today"
+SITE_PEAK_TODAY = "sensor.morisset_park_highest_power_peak_time_today"
 
 
 async def test_setup_creates_a_device_per_array_plus_the_site(hass: HomeAssistant, configured: MockConfigEntry) -> None:
@@ -118,8 +122,45 @@ async def test_energy_dashboard_hook(hass: HomeAssistant, configured: MockConfig
 
     total_kwh = sum(hours.values()) / 1000.0
     assert total_kwh > 1.0
-    # Two days of forecast, so at most 49 hours can carry energy.
-    assert len(hours) <= 49
+    # Today from local midnight, then two days ahead: at most 24 + 48 + 1 hours.
+    assert len(hours) <= 73
+
+
+async def test_today_counts_the_whole_day(hass: HomeAssistant, freezer: Any) -> None:
+    """Mid-afternoon, "today" includes the morning that has already happened.
+
+    An earlier version started the series at the present instant, so "today"
+    equalled "remaining today", the peak time was always now, and the energy
+    dashboard had no forecast for any hour before the integration last ran.
+    """
+    from homeassistant.util import dt as dt_util  # noqa: PLC0415
+
+    await hass.config.async_set_time_zone("Australia/Sydney")
+    # 15:00 local in AEDT: most of the day's sun is already behind it.
+    freezer.move_to("2026-11-15T04:00:00+00:00")
+    weather = synthetic_weather()
+
+    async def _fetch(*_args: Any, **_kwargs: Any) -> Any:
+        return weather
+
+    with patch("custom_components.soular.coordinator.coordinator.fetch", side_effect=_fetch):
+        entry = build_entry()
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        today = float(state_of(hass, SITE_TODAY))
+        remaining = float(state_of(hass, SITE_REMAINING))
+        assert today > 2 * remaining, f"today {today} kWh barely exceeds remaining {remaining} kWh"
+
+        peak = dt_util.parse_datetime(state_of(hass, SITE_PEAK_TODAY))
+        assert peak is not None
+        assert peak < dt_util.utcnow(), "on a clear day the peak is behind us by 15:00"
+
+        result = await async_get_solar_forecast(hass, entry.entry_id)
+        assert result is not None
+        morning = dt_util.as_local(datetime(2026, 11, 14, 23, tzinfo=UTC)).isoformat()
+        assert result["wh_hours"].get(morning, 0.0) > 0.0, "the dashboard has no forecast for this morning"
 
 
 async def test_energy_dashboard_returns_none_for_an_unknown_entry(hass: HomeAssistant) -> None:

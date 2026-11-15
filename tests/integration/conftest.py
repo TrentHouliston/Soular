@@ -43,7 +43,7 @@ ARRAY_DATA: tuple[dict[str, Any], ...] = (
 )
 
 
-def synthetic_weather(hours: int = 96) -> HourlyWeather:
+def synthetic_weather(hours: int = 96, history_hours: int = 24) -> HourlyWeather:
     """Build a plausible hourly forecast without touching the network.
 
     Anchored to *now* rather than a fixed date. A fixed date silently produces an
@@ -55,7 +55,7 @@ def synthetic_weather(hours: int = 96) -> HourlyWeather:
     that energy and peak time come out sane, which needs a curve with a peak.
     """
     now = int(dt_util.utcnow().timestamp())
-    start = np.datetime64(now - now % 3600 - 24 * 3600, "s")
+    start = np.datetime64(now - now % 3600 - history_hours * 3600, "s")
     times = np.arange(start, start + np.timedelta64(hours * 3600, "s"), np.timedelta64(3600, "s")).astype(
         "datetime64[s]"
     )

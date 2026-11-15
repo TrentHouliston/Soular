@@ -3,14 +3,15 @@
 from dataclasses import dataclass, field
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
+from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers.event import async_track_time_interval
 
 from custom_components.soular.const import CONF_BATTERY_SOC_SENSOR, CONF_POWER_SENSOR, SUBENTRY_TYPE_ARRAY
 from custom_components.soular.coordinator.actuals import Learner
 from custom_components.soular.coordinator.coordinator import SoularCoordinator
 from custom_components.soular.core.shading import TransmittanceGrid
-from custom_components.soular.learning.store import SAVE_DELAY_SECONDS, build_store, decode, encode
+from custom_components.soular.learning.store import SAVE_INTERVAL, build_store, decode, encode
 from custom_components.soular.system import build_system, load_all_shading, site_name
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
@@ -51,10 +52,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: SoularConfigEntry) -> bo
     )
     entry.runtime_data = SoularRuntimeData(coordinator=coordinator, shading=shading)
 
-    # Debounced: saving per sample would write every five minutes, and losing a
-    # few minutes of learning to a hard restart costs nothing measurable.
-    store.async_delay_save(lambda: encode(learner.states), SAVE_DELAY_SECONDS)
-    entry.async_on_unload(lambda: store.async_delay_save(lambda: encode(learner.states), 0))
+    # Saved on an interval rather than per sample, and on the way down. Home
+    # Assistant does not unload entries when it stops, so the unload hook alone
+    # would lose everything learned since setup on every restart.
+    #
+    # Both are @callback because the store is event-loop only: Home Assistant
+    # runs a plain function handed to a timer or the bus in an executor thread.
+    @callback
+    def save(*_: object) -> None:
+        store.async_delay_save(lambda: encode(learner.states), 0)
+
+    @callback
+    def save_on_stop(_event: Event) -> None:
+        save()
+
+    entry.async_on_unload(async_track_time_interval(hass, save, SAVE_INTERVAL))
+    entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, save_on_stop))
+    entry.async_on_unload(save)
 
     await coordinator.async_config_entry_first_refresh()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

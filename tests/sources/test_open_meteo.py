@@ -104,6 +104,8 @@ async def test_fetch_requests_horizontal_components(hass: HomeAssistant, aioclie
     assert "global_tilted_irradiance" not in requested
     # Wind defaults to km/h, which would over-cool the array by a factor of 3.6.
     assert url.query["wind_speed_unit"] == "ms"
+    # Today starts at local midnight, up to fourteen hours before UTC midnight.
+    assert url.query["past_days"] == "1"
 
 
 async def test_fetch_raises_on_an_http_error(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker) -> None:

@@ -1,9 +1,8 @@
 """Read measured output and fold it into the correction.
 
-Samples live state rather than replaying the recorder. That keeps setup fast and
-avoids a heavy history query on every restart, at the cost of taking a couple of
-days of daylight to reach a useful correction on a fresh install -- which the
-ramp-in already imposes anyway.
+Samples live state as it goes. An array with nothing learned yet is first caught
+up from the recorder's history (:mod:`.backfill`), once, so a fresh install is
+calibrated from the start rather than after days of daylight.
 
 Nothing here decides whether a sample is trustworthy; that is
 :mod:`custom_components.soular.core.mask`, which is pure so the backtest applies
@@ -18,8 +17,11 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.util import dt as dt_util
 import numpy as np
 
+from custom_components.soular.core.clearsky import clear_sky, clear_sky_index
 from custom_components.soular.core.correction import CorrectionState, build_features, observation_target, sample_weight
+from custom_components.soular.core.geometry import solar_geometry
 from custom_components.soular.core.mask import MaskInputs, usable
+from custom_components.soular.core.pipeline import ForecastResult, SystemSpec
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,6 +41,51 @@ class ArraySample:
     clearness: float
     day_of_year: float
     temperature_c: float
+
+
+def forecast_clearness(times: np.ndarray, system: SystemSpec, ghi: np.ndarray) -> np.ndarray:
+    """Return the clearness feature: the forecast's horizontal clear-sky index.
+
+    The one definition the correction is both trained and applied with. It is
+    deliberately horizontal: the plane-of-array index on a tilted plane also
+    varies with sun position and orientation, and training on that while
+    applying the horizontal one taught each array a different, geometry-shaped
+    cloud response.
+    """
+    clearsky = clear_sky(times, system.site, solar_geometry(times, system.site)).ghi
+    return np.nan_to_num(clear_sky_index(ghi, clearsky), nan=1.0)
+
+
+def samples_from(
+    result: ForecastResult, system: SystemSpec, ghi: np.ndarray, index: np.ndarray
+) -> dict[str, list[ArraySample]]:
+    """Build the learner's view of each array at the given points of a forecast.
+
+    ``ghi`` is the forecast's horizontal irradiance on the result's grid. Shared
+    by live sampling and the recorder backfill, so the two cannot drift into
+    training the correction on different features.
+    """
+    times = result.times[index]
+    geometry = solar_geometry(times, system.site)
+    clearness = forecast_clearness(times, system, ghi[index])
+    days = (times.astype("datetime64[D]") - times.astype("datetime64[Y]").astype("datetime64[D]")).astype(np.int64) + 1
+    capacity = {array.name: array.dc_capacity_w for array in system.arrays}
+
+    out: dict[str, list[ArraySample]] = {}
+    for entry in result.arrays:
+        out[entry.name] = [
+            ArraySample(
+                predicted_w=float(entry.dc_power_w[i]),
+                capacity_w=capacity.get(entry.name, 0.0),
+                transmittance=float(entry.transmittance[i]),
+                elevation_deg=float(geometry.apparent_elevation[k]),
+                clearness=float(clearness[k]),
+                day_of_year=float(days[k]),
+                temperature_c=float(entry.cell_temperature[i]),
+            )
+            for k, i in enumerate(index)
+        ]
+    return out
 
 
 @dataclass(slots=True)

@@ -7,6 +7,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from custom_components.soular import SoularConfigEntry
 from custom_components.soular.const import SUBENTRY_TYPE_ARRAY
 from custom_components.soular.entities import ARRAY_DIAGNOSTICS, SENSOR_DESCRIPTIONS, SITE_DIAGNOSTICS
+from custom_components.soular.entities.device import register_devices
 from custom_components.soular.entities.sensor import (
     SoularArrayDiagnosticSensor,
     SoularForecastSensor,
@@ -19,7 +20,7 @@ PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,  # noqa: ARG001 - fixed by the sensor platform signature
+    hass: HomeAssistant,
     entry: SoularConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
@@ -30,6 +31,9 @@ async def async_setup_entry(
         return
 
     name = site_name(entry)
+    arrays = [subentry for subentry in entry.subentries.values() if subentry.subentry_type == SUBENTRY_TYPE_ARRAY]
+    register_devices(hass, entry, name, arrays)
+
     entities: list[SensorEntity] = [
         SoularForecastSensor(coordinator, description, entry, name) for description in SENSOR_DESCRIPTIONS
     ]
@@ -38,9 +42,7 @@ async def async_setup_entry(
     )
     async_add_entities(entities)
 
-    for subentry in entry.subentries.values():
-        if subentry.subentry_type != SUBENTRY_TYPE_ARRAY:
-            continue
+    for subentry in arrays:
         array_entities: list[SensorEntity] = [
             SoularForecastSensor(coordinator, description, entry, name, subentry)
             for description in SENSOR_DESCRIPTIONS

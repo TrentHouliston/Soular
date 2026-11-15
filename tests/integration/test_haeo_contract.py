@@ -11,7 +11,7 @@ moves -- while still failing loudly here if the shape ever drifts.
 """
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -92,6 +92,9 @@ def test_series_starts_at_or_before_now(forecast_attributes: Mapping[str, Any]) 
     points = forecast_attributes["forecast"]
     first = datetime.fromisoformat(points[0]["time"])
     assert first <= dt_util.utcnow()
+    # ...but not long before it: the elapsed part of today is for the daily
+    # totals, and haeo would read it as the present.
+    assert dt_util.utcnow() - first < timedelta(minutes=5)
 
 
 def test_series_spans_whole_days(forecast_attributes: Mapping[str, Any]) -> None:
