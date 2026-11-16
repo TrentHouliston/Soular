@@ -1,13 +1,20 @@
 """The Soular solar forecasting integration."""
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
 
-from custom_components.soular.const import CONF_BATTERY_SOC_SENSOR, CONF_POWER_SENSOR, SUBENTRY_TYPE_ARRAY
+from custom_components.soular.const import (
+    CONF_BATTERY_SOC_SENSOR,
+    CONF_POWER_SENSOR,
+    SITE_SUBENTRY_TITLE,
+    SUBENTRY_TYPE_ARRAY,
+    SUBENTRY_TYPE_SITE,
+)
 from custom_components.soular.coordinator.actuals import Learner
 from custom_components.soular.coordinator.coordinator import SoularCoordinator
 from custom_components.soular.core.shading import TransmittanceGrid
@@ -28,8 +35,29 @@ class SoularRuntimeData:
 type SoularConfigEntry = ConfigEntry[SoularRuntimeData]
 
 
+def ensure_site_subentry(hass: HomeAssistant, entry: ConfigEntry) -> ConfigSubentry:
+    """Return the site's subentry, creating it on first setup or if it was deleted.
+
+    Called before the update listener is registered, so creating it does not
+    trigger a reload of the setup that created it.
+    """
+    for subentry in entry.subentries.values():
+        if subentry.subentry_type == SUBENTRY_TYPE_SITE:
+            return subentry
+    subentry = ConfigSubentry(
+        data=MappingProxyType({}),
+        subentry_type=SUBENTRY_TYPE_SITE,
+        title=SITE_SUBENTRY_TITLE,
+        unique_id=SUBENTRY_TYPE_SITE,
+    )
+    hass.config_entries.async_add_subentry(entry, subentry)
+    return subentry
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: SoularConfigEntry) -> bool:
     """Set up Soular from a config entry."""
+    ensure_site_subentry(hass, entry)
+
     # Reads shading files from disk, so it belongs off the event loop.
     shading = await hass.async_add_executor_job(load_all_shading, hass, entry)
 

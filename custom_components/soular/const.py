@@ -12,6 +12,12 @@ CONF_ALBEDO: Final = "albedo"
 CONF_GROUND_TYPE: Final = "ground_type"
 CONF_INVERTER_AC_LIMIT: Final = "inverter_ac_limit"
 
+# The site's own subentry, created automatically. It holds nothing but the site
+# device and its totals, which otherwise sit under "devices that don't belong to
+# a sub-entry" beside the arrays. Not offered as a flow, so there is only ever one.
+SUBENTRY_TYPE_SITE: Final = "site"
+SITE_SUBENTRY_TITLE: Final = "Total"
+
 # Array subentry keys.
 SUBENTRY_TYPE_ARRAY: Final = "array"
 CONF_AZIMUTH: Final = "azimuth"

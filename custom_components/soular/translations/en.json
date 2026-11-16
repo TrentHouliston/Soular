@@ -112,7 +112,8 @@
         "shading_file_not_found": "No such file in your config/soular directory."
       },
       "title": "Solar array"
-    }
+    },
+    "site": { "entry_type": "Site total" }
   },
   "entity": {
     "sensor": {

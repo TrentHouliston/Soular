@@ -50,6 +50,7 @@ def register_devices(
     hass: HomeAssistant,
     entry: ConfigEntry,
     site_name: str,
+    site_subentry: ConfigSubentry,
     subentries: list[ConfigSubentry],
 ) -> None:
     """Create the site and array devices, and hang each array off the site.
@@ -58,7 +59,19 @@ def register_devices(
     supported release, where neither of the two ``DeviceInfo`` spellings does.
     """
     registry = dr.async_get(hass)
-    site = registry.async_get_or_create(config_entry_id=entry.entry_id, **site_device(entry, site_name))
+    site = registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        config_subentry_id=site_subentry.subentry_id,
+        **site_device(entry, site_name),
+    )
+    # Installs from before the site had a subentry registered its device against
+    # the entry itself. Adding the subentry does not remove that, so the device
+    # would show in both places.
+    if None in site.config_entries_subentries.get(entry.entry_id, set()):
+        site = (
+            registry.async_update_device(site.id, remove_config_entry_id=entry.entry_id, remove_config_subentry_id=None)
+            or site
+        )
     for subentry in subentries:
         array = registry.async_get_or_create(
             config_entry_id=entry.entry_id,
