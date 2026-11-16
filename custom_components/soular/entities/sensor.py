@@ -13,6 +13,7 @@ from custom_components.soular.coordinator.coordinator import SoularCoordinator
 from custom_components.soular.core.series import power_at
 from custom_components.soular.core.types import FloatArray, TimeArray
 from custom_components.soular.entities import (
+    FURTHER_DAYS,
     ArrayDiagnosticDescription,
     SiteDiagnosticDescription,
     SoularSensorEntityDescription,
@@ -20,7 +21,7 @@ from custom_components.soular.entities import (
 )
 from custom_components.soular.entities.device import array_device, array_identifier, site_device, site_identifier
 
-# A 48-hour mixed-resolution series is ~350 points and about 20 kB of JSON.
+# An eight-day mixed-resolution series is ~550 points and about 30 kB of JSON.
 # Recording that every five minutes would add several gigabytes a year to the
 # recorder database for no benefit: it is a forecast, not a measurement.
 FORECAST_UNRECORDED_ATTRIBUTES = frozenset({"forecast", "watts"})
@@ -38,11 +39,11 @@ def local_window(times: TimeArray) -> Window:
     def instant(value: Any) -> np.datetime64:
         return np.datetime64(int(value.timestamp()), "s")
 
+    # Wall-clock arithmetic on an aware datetime, so each is a true local
+    # midnight even across a daylight-saving change.
     return Window(
         now=instant(now) if times.size == 0 else max(instant(now), times[0]),
-        today_start=instant(midnight),
-        today_end=instant(midnight + timedelta(days=1)),
-        tomorrow_end=instant(midnight + timedelta(days=2)),
+        midnights=tuple(instant(midnight + timedelta(days=offset)) for offset in range(max(FURTHER_DAYS) + 2)),
     )
 
 
@@ -79,6 +80,8 @@ class SoularForecastSensor(SoularSensorBase):
         self._attr_device_info = array_device(entry, subentry, site_name) if subentry else site_device(entry, site_name)
         if description.carries_forecast:
             self._attr_extra_state_attributes = {}
+        if subentry and not description.array_enabled_default:
+            self._attr_entity_registry_enabled_default = False
 
     @property
     def _series(self) -> tuple[TimeArray, FloatArray] | None:
@@ -125,8 +128,8 @@ class SoularForecastSensor(SoularSensorBase):
         if series is None:
             return None
         times, power = series
-        # From now: haeo reads interval zero as the present, and wants exactly
-        # the 48-hour horizon, not the elapsed part of today.
+        # From now: haeo reads interval zero as the present, and wants the
+        # horizon ahead, not the elapsed part of today.
         start = self.coordinator.data.now_index
         times, power = times[start:], power[start:]
 

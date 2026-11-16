@@ -109,8 +109,9 @@ def test_series_spans_whole_days(forecast_attributes: Mapping[str, Any]) -> None
     last = datetime.fromisoformat(points[-1]["time"])
     # The final point opens the last interval, so the span is one step short.
     span = (last - first).total_seconds()
-    assert span % SECONDS_PER_DAY != 0 or span > 0
-    covered = span + 15 * 60
+    assert span > 0
+    last_step = (last - datetime.fromisoformat(points[-2]["time"])).total_seconds()
+    covered = span + last_step
     assert covered % SECONDS_PER_DAY == 0, f"series covers {covered / 3600:.2f} hours, not a whole number of days"
 
 

@@ -33,9 +33,9 @@ HOURLY_VARIABLES = (
 )
 
 REQUEST_TIMEOUT = ClientTimeout(total=30)
-# Two days of forecast plus a day of slack, so the 48-hour horizon is always
-# covered even when a run is late.
-FORECAST_DAYS = 3
+# Days counted from today in UTC: the eight-day horizon from now, plus a day of
+# slack so it is always covered even when a run is late.
+FORECAST_DAYS = 10
 PAST_DAYS = 1
 
 

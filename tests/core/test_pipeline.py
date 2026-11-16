@@ -13,6 +13,8 @@ from custom_components.soular.core.geometry import solar_geometry
 from custom_components.soular.core.irradiance import diffuse_iam, plane_of_array
 from custom_components.soular.core.pipeline import (
     DEFAULT_HORIZON_HOURS,
+    EXTENDED_TERM_STEP_MINUTES,
+    FAR_TERM_HOURS,
     FAR_TERM_STEP_MINUTES,
     NEAR_TERM_HOURS,
     NEAR_TERM_STEP_MINUTES,
@@ -216,8 +218,25 @@ def test_build_time_grid_shape() -> None:
     near = grid.step_seconds == NEAR_TERM_STEP_MINUTES * 60
     assert near.sum() == NEAR_TERM_HOURS * 60 // NEAR_TERM_STEP_MINUTES
     far = grid.step_seconds == FAR_TERM_STEP_MINUTES * 60
-    assert far.sum() == (DEFAULT_HORIZON_HOURS - NEAR_TERM_HOURS) * 60 // FAR_TERM_STEP_MINUTES
+    assert far.sum() == (FAR_TERM_HOURS - NEAR_TERM_HOURS) * 60 // FAR_TERM_STEP_MINUTES
+    extended = grid.step_seconds == EXTENDED_TERM_STEP_MINUTES * 60
+    assert extended.sum() == (DEFAULT_HORIZON_HOURS - FAR_TERM_HOURS) * 60 // EXTENDED_TERM_STEP_MINUTES
     assert grid.times[0] == start
+    # Steps only ever lengthen: the tiers are in order and nothing overlaps.
+    assert np.all(np.diff(grid.times).astype(np.int64) == grid.step_seconds[:-1])
+
+
+def test_build_time_grid_reaches_a_week_out() -> None:
+    """The horizon covers "7 days from now" to its local midnight, from any start.
+
+    Started a second before midnight, today ends almost immediately and the last
+    daily total ends just under eight days later.
+    """
+    start = np.datetime64("2026-01-15T12:59:59", "s")  # 23:59:59 in Sydney
+    grid = build_time_grid(start)
+    end = grid.times[-1] + np.timedelta64(int(grid.step_seconds[-1]), "s")
+    seventh_midnight = np.datetime64("2026-01-15T13:00:00", "s") + np.timedelta64(7 * 24 * 3600, "s")
+    assert end >= seventh_midnight
 
 
 def test_weather_length_mismatch_is_rejected(system: SystemSpec, summer_day: TimeArray) -> None:
