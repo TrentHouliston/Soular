@@ -8,9 +8,10 @@ be regenerated or tweaked rather than hand-edited:
 
 writes the icon -- ``icon.png`` (for light themes: deeper amber, more opaque,
 so it holds up on white) and ``dark_icon.png`` (the luminous version) -- and the
-logo, that icon beside the wordmark, as ``logo.png`` and ``dark_logo.png``, each
-at 1x and 2x, into ``custom_components/soular/brand/``. Home Assistant 2026.8+ serves
-those for custom integrations directly.
+logo, the wordmark laid across that icon with its o where the soul strikes, as
+``logo.png`` and ``dark_logo.png``, each at 1x and 2x, into
+``custom_components/soular/brand/``. Home Assistant 2026.8+ serves those for
+custom integrations directly.
 """
 
 import argparse
@@ -34,11 +35,13 @@ IMPACT_UV = (0.46, 0.36)
 HEADING = np.array([-0.45, 1.0])
 # How much larger than its unit design the soul is drawn.
 SOUL_SCALE = 1.45
-# The logo's wordmark, its font size and its gap after the icon, as
-# fractions of the logo's height.
-WORDMARK = "soular"
-WORDMARK_SIZE = 0.52
-WORDMARK_GAP = -0.02
+# The logo's wordmark: how wide its o is, and the outline that lifts the
+# letters off the panel, as fractions of the icon's size.
+WORDMARK_O_WIDTH = 0.21
+WORDMARK_OUTLINE = 0.012
+# Letter and outline colours, for light and dark themes.
+TEXT_LIGHT_THEME_OUTLINE = (255, 255, 255)
+TEXT_DARK_THEME_OUTLINE = (20, 30, 50)
 TEXT_LIGHT_THEME = (22, 42, 82)
 TEXT_DARK_THEME = (238, 242, 248)
 
@@ -301,49 +304,57 @@ def render(size: int, palette: Palette) -> Image.Image:
     return Image.fromarray(rgba, "RGBA").resize((size, size), Image.Resampling.LANCZOS)
 
 
-def visual_centre(image: Image.Image) -> float:
-    """Where the eye puts an image's middle, as a fraction of its height.
+def render_logo(
+    height: int, palette: Palette, text_colour: tuple[int, int, int], outline: tuple[int, int, int]
+) -> Image.Image:
+    """Render the logo, ``height`` pixels tall: "soular" across the icon, its o the impact.
 
-    Halfway between the middle of its ink and its centre of mass: the mass alone
-    overcorrects towards the heavy panel and leaves the flame hanging above.
+    The o is centred where the soul strikes the panel and drawn in the flame's
+    orange, so the white-hot splash shows through its counter. The rest of the
+    word runs across the panel, outlined so it reads against the cells.
     """
-    alpha = np.asarray(image, dtype=np.float64)[..., 3] / 255.0
-    rows = np.arange(alpha.shape[0])
-    inked = rows[alpha.max(axis=1) > 0.3]  # noqa: PLR2004
-    ink_middle = (inked[0] + inked[-1]) / 2
-    mass = (alpha.sum(axis=1) * rows).sum() / alpha.sum()
-    return float((ink_middle + mass) / 2 / alpha.shape[0])
-
-
-def render_logo(height: int, palette: Palette, text_colour: tuple[int, int, int]) -> Image.Image:
-    """Render the logo, ``height`` pixels tall: the icon, then the wordmark beside it."""
     from matplotlib import font_manager  # noqa: PLC0415
     from PIL import ImageFont  # noqa: PLC0415
 
-    icon = render(height, palette)
+    n = height * SUPERSAMPLE
+    icon = render(height, palette).resize((n, n), Image.Resampling.LANCZOS)
+    impact = (panel_point(*IMPACT_UV) + 1) / 2 * n
 
-    # The wordmark is drawn supersampled and scaled down, like the icon.
-    scale = SUPERSAMPLE
     font_path = font_manager.findfont(font_manager.FontProperties(family="DejaVu Sans", weight="bold"))
-    font = ImageFont.truetype(font_path, round(height * WORDMARK_SIZE * scale))
-    left, _, right, _ = font.getbbox(WORDMARK, anchor="ls")
-    gap = round(height * WORDMARK_GAP * scale)
-    margin = round(height * 0.06 * scale)
-    width = height * scale + gap + int(np.ceil(right - left)) + margin
+    probe_size = 1000
+    probe = ImageFont.truetype(font_path, probe_size).getbbox("o", anchor="ls")
+    font = ImageFont.truetype(font_path, round(probe_size * WORDMARK_O_WIDTH * n / (probe[2] - probe[0])))
+    o_box = font.getbbox("o", anchor="ls")
 
-    text = Image.new("L", (width, height * scale), 0)
-    # Centre the lowercase body (baseline to x-height) on where the icon's
-    # weight sits, not on its middle: the panel is the heavy part, low down,
-    # so text centred on the square reads as floating high.
-    x_height = -font.getbbox("x", anchor="ls")[1]
-    baseline = visual_centre(icon) * height * scale + x_height / 2
-    ImageDraw.Draw(text).text((height * scale + gap - left, baseline), WORDMARK, font=font, fill=255, anchor="ls")
-    text = text.resize((round(width / scale), height), Image.Resampling.LANCZOS)
+    # Baseline origin of the word, placed so the o is centred on the impact.
+    o_left = font.getlength("s")
+    origin_x = impact[0] - o_left - (o_box[0] + o_box[2]) / 2
+    baseline = impact[1] - (o_box[1] + o_box[3]) / 2
+    left = min(0.0, origin_x - 0.04 * n)
+    right = max(float(n), origin_x + font.getlength("soular") + 0.05 * n)
+    width = int(np.ceil(right - left))
+    x0 = origin_x - left
 
-    logo = Image.new("RGBA", text.size, (*text_colour, 0))
-    logo.putalpha(text)
-    logo.alpha_composite(icon, (0, 0))
-    return logo
+    logo = Image.new("RGBA", (width, n), (0, 0, 0, 0))
+    logo.alpha_composite(icon, (round(-left), 0))
+    draw = ImageDraw.Draw(logo)
+    stroke = round(WORDMARK_OUTLINE * n)
+    orange = palette.light[1][1]
+    for x, letters, fill in (
+        (x0, "s", text_colour),
+        (x0 + o_left, "o", orange),
+        (x0 + font.getlength("so"), "ular", text_colour),
+    ):
+        draw.text(
+            (x, baseline),
+            letters,
+            font=font,
+            fill=(*fill, 255),
+            anchor="ls",
+            stroke_width=stroke,
+            stroke_fill=(*outline, 255),
+        )
+    return logo.resize((round(width / SUPERSAMPLE), height), Image.Resampling.LANCZOS)
 
 
 def main() -> None:
@@ -358,10 +369,13 @@ def main() -> None:
             render(size, palette).save(path, optimize=True)
             print(f"wrote {path}")
     # Home Assistant wants a logo's shortest side between 128 and 256 pixels.
-    for prefix, palette, text in (("", LIGHT, TEXT_LIGHT_THEME), ("dark_", DARK, TEXT_DARK_THEME)):
+    for prefix, palette, text, outline in (
+        ("", LIGHT, TEXT_LIGHT_THEME, TEXT_LIGHT_THEME_OUTLINE),
+        ("dark_", DARK, TEXT_DARK_THEME, TEXT_DARK_THEME_OUTLINE),
+    ):
         for suffix, height in (("", 128), ("@2x", 256)):
             path = args.out / f"{prefix}logo{suffix}.png"
-            render_logo(height, palette, text).save(path, optimize=True)
+            render_logo(height, palette, text, outline).save(path, optimize=True)
             print(f"wrote {path}")
 
 
