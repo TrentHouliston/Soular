@@ -62,6 +62,7 @@ class SoularSensorBase(CoordinatorEntity[SoularCoordinator], SensorEntity):
 class SoularForecastSensor(SoularSensorBase):
     """A sensor derived from a power series."""
 
+    _unrecorded_attributes = FORECAST_UNRECORDED_ATTRIBUTES
     entity_description: SoularSensorEntityDescription
 
     def __init__(

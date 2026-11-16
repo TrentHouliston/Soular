@@ -20,6 +20,7 @@ from custom_components.soular import async_setup_entry
 from custom_components.soular.const import CONF_ALBEDO, CONF_INVERTER_AC_LIMIT, DOMAIN
 from custom_components.soular.diagnostics import async_get_config_entry_diagnostics
 from custom_components.soular.energy import async_get_solar_forecast
+from custom_components.soular.entities.device import find_device, site_identifier
 from tests.integration.conftest import ARRAY_DATA, build_entry, synthetic_weather
 
 
@@ -55,7 +56,7 @@ async def test_setup_creates_a_device_per_array_plus_the_site(hass: HomeAssistan
 async def test_arrays_hang_off_the_site_device(hass: HomeAssistant, configured: MockConfigEntry) -> None:
     """Array devices declare the site as their parent."""
     registry = dr.async_get(hass)
-    site = registry.async_get_device(identifiers={(DOMAIN, configured.entry_id)})
+    site = find_device(registry, configured, site_identifier(configured))
     assert site is not None
 
     arrays = [
@@ -143,6 +144,17 @@ async def test_peak_time_lands_in_daylight(hass: HomeAssistant, configured: Mock
 async def test_power_now_is_never_negative(hass: HomeAssistant, configured: MockConfigEntry) -> None:
     """Power is zero at night, never negative."""
     assert float(state_of(hass, SITE_POWER)) >= 0.0
+
+
+async def test_the_forecast_series_is_kept_out_of_the_recorder(
+    hass: HomeAssistant, configured: MockConfigEntry
+) -> None:
+    """The series is far over the recorder's 16 kB limit, which drops the whole row's attributes with a warning."""
+    state = hass.states.get(SITE_POWER)
+    assert state is not None
+    assert "forecast" in state.attributes
+    assert state.state_info is not None
+    assert "forecast" in state.state_info["unrecorded_attributes"]
 
 
 async def test_energy_dashboard_hook(hass: HomeAssistant, configured: MockConfigEntry) -> None:

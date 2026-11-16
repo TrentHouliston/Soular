@@ -8,7 +8,7 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.soular.const import DOMAIN, SITE_SUBENTRY_TITLE, SUBENTRY_TYPE_SITE
-from custom_components.soular.entities.device import site_identifier
+from custom_components.soular.entities.device import device_subentries, find_device, site_identifier
 from tests.integration.conftest import build_entry
 
 
@@ -19,7 +19,7 @@ def site_subentries(entry: MockConfigEntry) -> list[Any]:
 
 def site_entities(hass: HomeAssistant, entry: MockConfigEntry) -> list[er.RegistryEntry]:
     """Return the entities on the site device."""
-    device = dr.async_get(hass).async_get_device(identifiers={site_identifier(entry)})
+    device = find_device(dr.async_get(hass), entry, site_identifier(entry))
     assert device is not None
     return er.async_entries_for_device(er.async_get(hass), device.id)
 
@@ -29,9 +29,9 @@ async def test_setup_puts_the_site_under_its_own_subentry(hass: HomeAssistant, c
     (site,) = site_subentries(configured)
     assert site.title == SITE_SUBENTRY_TITLE
 
-    device = dr.async_get(hass).async_get_device(identifiers={site_identifier(configured)})
+    device = find_device(dr.async_get(hass), configured, site_identifier(configured))
     assert device is not None
-    assert device.config_entries_subentries[configured.entry_id] == {site.subentry_id}
+    assert device_subentries(device, configured) == {site.subentry_id}
 
     entities = site_entities(hass, configured)
     assert entities
@@ -67,7 +67,7 @@ async def test_an_existing_install_moves_its_site_across(hass: HomeAssistant, mo
     (site,) = site_subentries(entry)
     device = devices.async_get(old.id)
     assert device is not None
-    assert device.config_entries_subentries[entry.entry_id] == {site.subentry_id}
+    assert device_subentries(device, entry) == {site.subentry_id}
     moved = er.async_get(hass).async_get(old_entity.entity_id)
     assert moved is not None
     assert moved.config_subentry_id == site.subentry_id
