@@ -68,4 +68,3 @@ async def test_arrays_added_during_setup_are_all_forecast(hass: HomeAssistant) -
         state = hass.states.get(entity_id)
         assert state is not None
         assert state.state != STATE_UNAVAILABLE, entity_id
-
