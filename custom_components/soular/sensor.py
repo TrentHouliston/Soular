@@ -31,7 +31,15 @@ async def async_setup_entry(
         return
 
     name = site_name(entry)
-    arrays = [subentry for subentry in entry.subentries.values() if subentry.subentry_type == SUBENTRY_TYPE_ARRAY]
+    # The arrays the coordinator was built with, not whatever the entry holds by
+    # now: one added during setup has no forecast behind it until the reload it
+    # triggered, and an entity for it would sit unavailable until then.
+    modelled = {array.name for array in coordinator.system.arrays}
+    arrays = [
+        subentry
+        for subentry in entry.subentries.values()
+        if subentry.subentry_type == SUBENTRY_TYPE_ARRAY and str(subentry.title) in modelled
+    ]
     register_devices(hass, entry, name, arrays)
 
     entities: list[SensorEntity] = [

@@ -70,10 +70,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: SoularConfigEntry) -> bo
     entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, save_on_stop))
     entry.async_on_unload(save)
 
+    # Listening before the first refresh, not after it: that refresh reads the
+    # recorder and Open-Meteo and can take seconds, and an array added in the
+    # meantime must still trigger a rebuild. The reload waits on the setup lock,
+    # so it runs once this setup has finished.
+    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+
     await coordinator.async_config_entry_first_refresh()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
 
 
@@ -81,9 +85,11 @@ async def async_reload_entry(hass: HomeAssistant, entry: SoularConfigEntry) -> N
     """Reload when configuration changes.
 
     Adding or editing an array changes the system spec the coordinator was built
-    with, so the whole entry is rebuilt rather than patched in place.
+    with, so the whole entry is rebuilt rather than patched in place. Scheduled
+    rather than awaited, so the listener returns at once and a change made during
+    a reload queues another one behind it.
     """
-    await hass.config_entries.async_reload(entry.entry_id)
+    hass.config_entries.async_schedule_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: SoularConfigEntry) -> bool:
