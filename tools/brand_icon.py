@@ -301,6 +301,20 @@ def render(size: int, palette: Palette) -> Image.Image:
     return Image.fromarray(rgba, "RGBA").resize((size, size), Image.Resampling.LANCZOS)
 
 
+def visual_centre(image: Image.Image) -> float:
+    """Where the eye puts an image's middle, as a fraction of its height.
+
+    Halfway between the middle of its ink and its centre of mass: the mass alone
+    overcorrects towards the heavy panel and leaves the flame hanging above.
+    """
+    alpha = np.asarray(image, dtype=np.float64)[..., 3] / 255.0
+    rows = np.arange(alpha.shape[0])
+    inked = rows[alpha.max(axis=1) > 0.3]  # noqa: PLR2004
+    ink_middle = (inked[0] + inked[-1]) / 2
+    mass = (alpha.sum(axis=1) * rows).sum() / alpha.sum()
+    return float((ink_middle + mass) / 2 / alpha.shape[0])
+
+
 def render_logo(height: int, palette: Palette, text_colour: tuple[int, int, int]) -> Image.Image:
     """Render the logo, ``height`` pixels tall: the icon, then the wordmark beside it."""
     from matplotlib import font_manager  # noqa: PLC0415
@@ -318,9 +332,11 @@ def render_logo(height: int, palette: Palette, text_colour: tuple[int, int, int]
     width = height * scale + gap + int(np.ceil(right - left)) + margin
 
     text = Image.new("L", (width, height * scale), 0)
-    # Centre the lowercase body (baseline to x-height) on the icon's middle.
+    # Centre the lowercase body (baseline to x-height) on where the icon's
+    # weight sits, not on its middle: the panel is the heavy part, low down,
+    # so text centred on the square reads as floating high.
     x_height = -font.getbbox("x", anchor="ls")[1]
-    baseline = (height * scale + x_height) / 2
+    baseline = visual_centre(icon) * height * scale + x_height / 2
     ImageDraw.Draw(text).text((height * scale + gap - left, baseline), WORDMARK, font=font, fill=255, anchor="ls")
     text = text.resize((round(width / scale), height), Image.Resampling.LANCZOS)
 
