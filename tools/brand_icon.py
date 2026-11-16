@@ -8,8 +8,8 @@ be regenerated or tweaked rather than hand-edited:
 
 writes the icon -- ``icon.png`` (for light themes: deeper amber, more opaque,
 so it holds up on white) and ``dark_icon.png`` (the luminous version) -- and the
-wordmark logo, its o the soul, as ``logo.png`` and ``dark_logo.png``, each at 1x
-and 2x, into ``custom_components/soular/brand/``. Home Assistant 2026.8+ serves
+logo, that icon beside the wordmark, as ``logo.png`` and ``dark_logo.png``, each
+at 1x and 2x, into ``custom_components/soular/brand/``. Home Assistant 2026.8+ serves
 those for custom integrations directly.
 """
 
@@ -34,8 +34,11 @@ IMPACT_UV = (0.46, 0.36)
 HEADING = np.array([-0.45, 1.0])
 # How much larger than its unit design the soul is drawn.
 SOUL_SCALE = 1.45
-# In the logo the tail leans back to the left, over the s, by this many degrees.
-LOGO_TAIL_LEAN_DEG = 50.0
+# The logo's wordmark, its font size and its gap after the icon, as
+# fractions of the logo's height.
+WORDMARK = "soular"
+WORDMARK_SIZE = 0.52
+WORDMARK_GAP = -0.02
 TEXT_LIGHT_THEME = (22, 42, 82)
 TEXT_DARK_THEME = (238, 242, 248)
 
@@ -299,77 +302,32 @@ def render(size: int, palette: Palette) -> Image.Image:
 
 
 def render_logo(height: int, palette: Palette, text_colour: tuple[int, int, int]) -> Image.Image:
-    """Render the wordmark "soular", its o the glowing soul, ``height`` pixels tall.
-
-    The soul's head takes the o's place and size; its tail streams up and back
-    to the left, over the short s and clear of the tall l.
-    """
+    """Render the logo, ``height`` pixels tall: the icon, then the wordmark beside it."""
     from matplotlib import font_manager  # noqa: PLC0415
     from PIL import ImageFont  # noqa: PLC0415
 
-    rng = np.random.default_rng(SEED)
+    icon = render(height, palette)
+
+    # The wordmark is drawn supersampled and scaled down, like the icon.
+    scale = SUPERSAMPLE
     font_path = font_manager.findfont(font_manager.FontProperties(family="DejaVu Sans", weight="bold"))
-    font_size = 160 * SUPERSAMPLE
-    font = ImageFont.truetype(font_path, font_size)
+    font = ImageFont.truetype(font_path, round(height * WORDMARK_SIZE * scale))
+    left, _, right, _ = font.getbbox(WORDMARK, anchor="ls")
+    gap = round(height * WORDMARK_GAP * scale)
+    margin = round(height * 0.06 * scale)
+    width = height * scale + gap + (right - left) + margin
 
-    # Layout, relative to the baseline at the s's origin.
-    o_left = font.getlength("s")
-    ular_x = font.getlength("so")
-    o_box = font.getbbox("o", anchor="ls")
-    ular_box = font.getbbox("ular", anchor="ls")
-    radius = (o_box[3] - o_box[1]) / 2
-    centre = (o_left + (o_box[0] + o_box[2]) / 2, (o_box[1] + o_box[3]) / 2)
-    unit = radius / 0.17  # pixels per soul unit: the head fills the o's counter
-    tail_length = 1.05
-    lean = np.radians(LOGO_TAIL_LEAN_DEG)
-    reach = (tail_length * 1.0 + 0.1) * unit
-    tip = (centre[0] - np.sin(lean) * reach, centre[1] - np.cos(lean) * reach)
+    text = Image.new("L", (width, height * scale), 0)
+    # Centre the lowercase body (baseline to x-height) on the icon's middle.
+    x_height = -font.getbbox("x", anchor="ls")[1]
+    baseline = (height * scale + x_height) / 2
+    ImageDraw.Draw(text).text((height * scale + gap - left, baseline), WORDMARK, font=font, fill=255, anchor="ls")
+    text = text.resize((round(width / scale), height), Image.Resampling.LANCZOS)
 
-    pad = 0.30 * unit
-    left = min(0.0, tip[0] - pad)
-    top = min(float(ular_box[1]), tip[1] - pad)
-    right = ular_x + ular_box[2] + pad * 0.4
-    bottom = max(float(ular_box[3]), centre[1] + radius) + pad * 0.6
-    width_px, height_px = int(np.ceil(right - left)), int(np.ceil(bottom - top))
-    origin = (-left, -top)  # where the baseline origin lands on the canvas
-
-    text = Image.new("L", (width_px, height_px), 0)
-    draw = ImageDraw.Draw(text)
-    draw.text(origin, "s", font=font, fill=255, anchor="ls")
-    draw.text((origin[0] + ular_x, origin[1]), "ular", font=font, fill=255, anchor="ls")
-    text_alpha = np.asarray(text, dtype=np.float64) / 255.0
-    # The o itself, drawn in light, so it still reads as a letter around the soul.
-    o_glyph = Image.new("L", (width_px, height_px), 0)
-    ImageDraw.Draw(o_glyph).text((origin[0] + o_left, origin[1]), "o", font=font, fill=255, anchor="ls")
-    o_alpha = np.asarray(o_glyph, dtype=np.float64) / 255.0
-
-    y, x = np.mgrid[0:height_px, 0:width_px].astype(np.float64)
-    dx, dy = x - (origin[0] + centre[0]), y - (origin[1] + centre[1])
-    # Into the soul's frame: its tail runs up the negative local y axis.
-    local_y = (dx * np.sin(lean) + dy * np.cos(lean)) / unit
-    local_x = (dx * np.cos(lean) - dy * np.sin(lean)) / unit
-    light = soul(local_x, local_y, rng, tail_length=tail_length, glow_weight=0.25)
-    light += o_alpha * 0.75
-
-    # A few embers shed from the tail.
-    for _ in range(6):
-        along = rng.uniform(0.25, 0.85) * tail_length
-        aside = rng.normal(0.0, 0.16)
-        r = rng.uniform(0.012, 0.022)
-        light += rng.uniform(0.5, 0.9) * np.exp(-(((local_x - aside) ** 2 + (local_y + along) ** 2) / r**2))
-    # Fade before the canvas edge, so nothing is cut off.
-    edge = np.minimum.reduce([x, y, width_px - 1 - x, height_px - 1 - y]) / (0.12 * unit)
-    light = np.clip(light * smoothstep(0.0, 1.0, edge), 0, None)
-
-    light_rgb, light_alpha = colourise(light, palette)
-    text_rgb = np.array(text_colour, dtype=np.float64) / 255.0
-    alpha = light_alpha + text_alpha * (1 - light_alpha)
-    rgb = (light_rgb * light_alpha[..., None] + text_rgb * (text_alpha * (1 - light_alpha))[..., None]) / np.maximum(
-        alpha, 1e-6
-    )[..., None]
-    rgba = np.dstack([rgb * 255, alpha * 255]).clip(0, 255).astype(np.uint8)
-    width = round(height * width_px / height_px)
-    return Image.fromarray(rgba, "RGBA").resize((width, height), Image.Resampling.LANCZOS)
+    logo = Image.new("RGBA", text.size, (*text_colour, 0))
+    logo.putalpha(text)
+    logo.alpha_composite(icon, (0, 0))
+    return logo
 
 
 def main() -> None:
