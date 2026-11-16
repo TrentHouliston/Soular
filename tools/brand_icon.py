@@ -315,7 +315,7 @@ def render_logo(height: int, palette: Palette, text_colour: tuple[int, int, int]
     left, _, right, _ = font.getbbox(WORDMARK, anchor="ls")
     gap = round(height * WORDMARK_GAP * scale)
     margin = round(height * 0.06 * scale)
-    width = height * scale + gap + (right - left) + margin
+    width = height * scale + gap + int(np.ceil(right - left)) + margin
 
     text = Image.new("L", (width, height * scale), 0)
     # Centre the lowercase body (baseline to x-height) on the icon's middle.
