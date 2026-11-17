@@ -98,17 +98,21 @@ per-array power, so the sun has visited every part of the sky it ever will.
 
 ## What you get
 
-On the site device:
+On the site device, under the **Total** subentry beside your arrays:
 
-| Entity                                                               |                                                                                        |
-| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| **Estimated power production - now**                                 | The current forecast, and the entity carrying the full 48-hour series as an attribute. |
-| **Estimated energy production - today / remaining today / tomorrow** | Daily totals in kWh.                                                                   |
-| **Estimated energy production - this hour / next hour**              | Disabled by default.                                                                   |
-| **Highest power peak time - today / tomorrow**                       | When the peak lands.                                                                   |
+| Entity                                                                 |                                                                                          |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **Estimated power production - now**                                   | The current forecast, and the entity carrying the full eight-day series as an attribute. |
+| **Estimated energy production - today / remaining today / tomorrow**   | Daily totals in kWh.                                                                     |
+| **Estimated energy production - day after tomorrow … 7 days from now** | The week ahead, one daily total each, as `open_meteo_solar_forecast` has.                |
+| **Estimated energy production - this hour / next hour**                | Disabled by default.                                                                     |
+| **Highest power peak time - today / tomorrow**                         | When the peak lands.                                                                     |
 
-Each array gets the same power and energy sensors for its own plane, plus
-diagnostics that start disabled: plane-of-array irradiance, cell temperature,
+The series is five-minute steps for the first six hours, quarter-hours out to two
+days, and half-hours beyond that.
+
+Each array gets the same power and energy sensors for its own plane (the days past
+tomorrow start disabled there), plus diagnostics that start disabled: plane-of-array irradiance, cell temperature,
 shading transmittance, the learned correction and how many samples are behind it.
 
 A site diagnostic, also disabled by default, reports when the weather was last
@@ -123,7 +127,8 @@ the site's hourly forecast.
 **haeo.** Point a solar element at
 `sensor.<site>_estimated_power_production_now`. Soular emits haeo's own richest
 forecast format — the series with units and interpolation mode — starting at
-now and spanning exactly 48 hours, which is what haeo's forecast cycle expects.
+now and spanning a whole number of days (eight), which is what haeo's forecast
+cycle expects. haeo uses as much of it as its own horizon covers.
 
 ## How often it updates
 

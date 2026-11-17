@@ -43,7 +43,7 @@ ARRAY_DATA: tuple[dict[str, Any], ...] = (
 )
 
 
-def synthetic_weather(hours: int = 96, history_hours: int = 24) -> HourlyWeather:
+def synthetic_weather(hours: int = 24 * 10, history_hours: int = 24) -> HourlyWeather:
     """Build a plausible hourly forecast without touching the network.
 
     Anchored to *now* rather than a fixed date. A fixed date silently produces an

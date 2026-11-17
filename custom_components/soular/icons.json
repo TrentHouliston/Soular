@@ -13,6 +13,24 @@
       "energy_next_hour": {
         "default": "mdi:clock-fast"
       },
+      "energy_production_d2": {
+        "default": "mdi:solar-power-variant"
+      },
+      "energy_production_d3": {
+        "default": "mdi:solar-power-variant"
+      },
+      "energy_production_d4": {
+        "default": "mdi:solar-power-variant"
+      },
+      "energy_production_d5": {
+        "default": "mdi:solar-power-variant"
+      },
+      "energy_production_d6": {
+        "default": "mdi:solar-power-variant"
+      },
+      "energy_production_d7": {
+        "default": "mdi:solar-power-variant"
+      },
       "energy_production_today": {
         "default": "mdi:solar-power-variant"
       },

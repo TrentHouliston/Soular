@@ -23,14 +23,37 @@ from custom_components.soular.core.types import FloatArray, TimeArray
 type SeriesValue = float | dt.datetime | None
 
 
+# Days ahead with a daily total of their own, after today and tomorrow: "day
+# after tomorrow" through "7 days from now", as open_meteo_solar_forecast has.
+FURTHER_DAYS: Final = range(2, 8)
+
+
 @dataclass(frozen=True, slots=True)
 class Window:
     """Local day boundaries, as UTC instants on the forecast grid."""
 
     now: np.datetime64
-    today_start: np.datetime64
-    today_end: np.datetime64
-    tomorrow_end: np.datetime64
+    # Local midnights: the start of today, then the end of each day after it.
+    midnights: tuple[np.datetime64, ...]
+
+    def day(self, offset: int) -> tuple[np.datetime64, np.datetime64]:
+        """Return the start and end of the local day ``offset`` days from today."""
+        return self.midnights[offset], self.midnights[offset + 1]
+
+    @property
+    def today_start(self) -> np.datetime64:
+        """Local midnight at the start of today."""
+        return self.midnights[0]
+
+    @property
+    def today_end(self) -> np.datetime64:
+        """Local midnight at the end of today."""
+        return self.midnights[1]
+
+    @property
+    def tomorrow_end(self) -> np.datetime64:
+        """Local midnight at the end of tomorrow."""
+        return self.midnights[2]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -43,6 +66,9 @@ class SoularSensorEntityDescription(SensorEntityDescription):
     carries_forecast: bool = False
     # Site-only sensors would be meaningless or duplicated per array.
     site_only: bool = False
+    # Whether the per-array copy starts enabled. The days past tomorrow are a
+    # site-level planning number; six more sensors on every array is clutter.
+    array_enabled_default: bool = True
 
 
 def _peak(times: TimeArray, power: FloatArray, start: np.datetime64, end: np.datetime64) -> dt.datetime | None:
@@ -87,6 +113,18 @@ SENSOR_DESCRIPTIONS: Final[tuple[SoularSensorEntityDescription, ...]] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         suggested_display_precision=1,
         value=lambda times, power, window: energy_between(times, power, window.today_end, window.tomorrow_end),
+    ),
+    *(
+        SoularSensorEntityDescription(
+            key=f"energy_production_d{offset}",
+            translation_key=f"energy_production_d{offset}",
+            device_class=SensorDeviceClass.ENERGY,
+            native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+            suggested_display_precision=1,
+            array_enabled_default=False,
+            value=lambda times, power, window, offset=offset: energy_between(times, power, *window.day(offset)),
+        )
+        for offset in FURTHER_DAYS
     ),
     SoularSensorEntityDescription(
         key="energy_current_hour",

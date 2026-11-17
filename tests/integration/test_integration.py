@@ -20,6 +20,7 @@ from custom_components.soular import async_setup_entry
 from custom_components.soular.const import CONF_ALBEDO, CONF_INVERTER_AC_LIMIT, DOMAIN
 from custom_components.soular.diagnostics import async_get_config_entry_diagnostics
 from custom_components.soular.energy import async_get_solar_forecast
+from custom_components.soular.entities.device import find_device, site_identifier
 from tests.integration.conftest import ARRAY_DATA, build_entry, synthetic_weather
 
 
@@ -55,7 +56,7 @@ async def test_setup_creates_a_device_per_array_plus_the_site(hass: HomeAssistan
 async def test_arrays_hang_off_the_site_device(hass: HomeAssistant, configured: MockConfigEntry) -> None:
     """Array devices declare the site as their parent."""
     registry = dr.async_get(hass)
-    site = registry.async_get_device(identifiers={(DOMAIN, configured.entry_id)})
+    site = find_device(registry, configured, site_identifier(configured))
     assert site is not None
 
     arrays = [
@@ -83,6 +84,38 @@ async def test_tomorrow_has_real_energy(hass: HomeAssistant, configured: MockCon
     ]
     assert all(value > 0.0 for value in per_array)
     assert sum(per_array) == pytest.approx(total, rel=1e-6)
+
+
+async def test_every_day_of_the_week_ahead_has_a_total(hass: HomeAssistant, configured: MockConfigEntry) -> None:
+    """Day after tomorrow through 7 days from now, as open_meteo_solar_forecast has.
+
+    The synthetic sky is the same clear day every day, so each total is close to
+    tomorrow's. A day that fell off the end of the horizon would come out short,
+    not zero, which is why this compares against tomorrow rather than checking
+    for energy at all.
+    """
+    tomorrow = float(state_of(hass, SITE_TOMORROW))
+    names = ["day_after_tomorrow", *(f"{days}_days_from_now" for days in range(3, 8))]
+    for name in names:
+        total = float(state_of(hass, f"sensor.morisset_park_estimated_energy_production_{name}"))
+        assert total == pytest.approx(tomorrow, rel=0.05), name
+
+
+async def test_the_week_ahead_is_site_level_by_default(hass: HomeAssistant, configured: MockConfigEntry) -> None:
+    """Per array, the days past tomorrow exist but start disabled."""
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{configured.entry_id}_{array_subentry(configured, 'east').subentry_id}_energy_production_d2"
+    )
+    assert entity_id is not None
+    entry = registry.async_get(entity_id)
+    assert entry is not None
+    assert entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+
+
+def array_subentry(entry: MockConfigEntry, name: str) -> Any:
+    """Return the array subentry with this title."""
+    return next(subentry for subentry in entry.subentries.values() if subentry.title == name)
 
 
 async def test_geometric_twins_produce_identically_without_shading(
@@ -113,6 +146,17 @@ async def test_power_now_is_never_negative(hass: HomeAssistant, configured: Mock
     assert float(state_of(hass, SITE_POWER)) >= 0.0
 
 
+async def test_the_forecast_series_is_kept_out_of_the_recorder(
+    hass: HomeAssistant, configured: MockConfigEntry
+) -> None:
+    """The series is far over the recorder's 16 kB limit, which drops the whole row's attributes with a warning."""
+    state = hass.states.get(SITE_POWER)
+    assert state is not None
+    assert "forecast" in state.attributes
+    assert state.state_info is not None
+    assert "forecast" in state.state_info["unrecorded_attributes"]
+
+
 async def test_energy_dashboard_hook(hass: HomeAssistant, configured: MockConfigEntry) -> None:
     """The energy dashboard gets hourly watt-hours that add up."""
     result = await async_get_solar_forecast(hass, configured.entry_id)
@@ -122,8 +166,8 @@ async def test_energy_dashboard_hook(hass: HomeAssistant, configured: MockConfig
 
     total_kwh = sum(hours.values()) / 1000.0
     assert total_kwh > 1.0
-    # Today from local midnight, then two days ahead: at most 24 + 48 + 1 hours.
-    assert len(hours) <= 73
+    # Today from local midnight, then eight days ahead: at most 24 + 192 + 1 hours.
+    assert len(hours) <= 217
 
 
 async def test_today_counts_the_whole_day(hass: HomeAssistant, freezer: Any) -> None:

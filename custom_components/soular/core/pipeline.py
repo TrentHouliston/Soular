@@ -33,7 +33,13 @@ from custom_components.soular.core.types import (
 NEAR_TERM_STEP_MINUTES = 5
 FAR_TERM_STEP_MINUTES = 15
 NEAR_TERM_HOURS = 6
-DEFAULT_HORIZON_HOURS = 48
+# Past two days the forecast is for planning a week, not for scheduling a
+# battery, and half-hour steps keep the series attribute a manageable size.
+EXTENDED_TERM_STEP_MINUTES = 30
+FAR_TERM_HOURS = 48
+# Eight days, so "7 days from now" is covered to its local midnight whatever the
+# time of day: the same reach as open_meteo_solar_forecast.
+DEFAULT_HORIZON_HOURS = 8 * 24
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,9 +117,13 @@ def build_time_grid(
     *,
     horizon_hours: int = DEFAULT_HORIZON_HOURS,
     near_term_hours: int = NEAR_TERM_HOURS,
+    far_term_hours: int = FAR_TERM_HOURS,
     history_start: np.datetime64 | None = None,
 ) -> TimeGrid:
-    """Build the standard mixed-resolution grid: fine near-term, coarse beyond.
+    """Build the standard mixed-resolution grid: fine near-term, coarser beyond.
+
+    Three tiers from ``start``: five-minute steps for the first hours,
+    quarter-hours to two days, and half-hours from there to the horizon.
 
     The horizon is a whole number of hours starting at ``start`` because haeo pads
     a forecast series to whole days by wrapping its head onto its tail. A series
@@ -130,18 +140,24 @@ def build_time_grid(
         if history_start is not None
         else np.array([], dtype="datetime64[s]")
     )
-    near_end = origin + np.timedelta64(near_term_hours * 3600, "s")
-    far_end = origin + np.timedelta64(horizon_hours * 3600, "s")
+    horizon_end = origin + np.timedelta64(horizon_hours * 3600, "s")
+    near_end = min(origin + np.timedelta64(near_term_hours * 3600, "s"), horizon_end)
+    far_end = min(origin + np.timedelta64(far_term_hours * 3600, "s"), horizon_end)
 
-    near = np.arange(origin, near_end, np.timedelta64(NEAR_TERM_STEP_MINUTES * 60, "s")).astype("datetime64[s]")
-    far = np.arange(near_end, far_end, np.timedelta64(FAR_TERM_STEP_MINUTES * 60, "s")).astype("datetime64[s]")
-    times = np.concatenate([past, near, far])
+    def tier(begin: np.datetime64, end: np.datetime64, minutes: int) -> np.ndarray:
+        return np.arange(begin, end, np.timedelta64(minutes * 60, "s")).astype("datetime64[s]")
+
+    near = tier(origin, near_end, NEAR_TERM_STEP_MINUTES)
+    far = tier(near_end, far_end, FAR_TERM_STEP_MINUTES)
+    extended = tier(far_end, horizon_end, EXTENDED_TERM_STEP_MINUTES)
+    times = np.concatenate([past, near, far, extended])
 
     steps = np.concatenate(
         [
             np.full(past.size, FAR_TERM_STEP_MINUTES * 60.0),
             np.full(near.size, NEAR_TERM_STEP_MINUTES * 60.0),
             np.full(far.size, FAR_TERM_STEP_MINUTES * 60.0),
+            np.full(extended.size, EXTENDED_TERM_STEP_MINUTES * 60.0),
         ]
     )
     return TimeGrid(times=times, step_seconds=steps)
