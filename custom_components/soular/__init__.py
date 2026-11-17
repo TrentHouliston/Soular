@@ -17,8 +17,9 @@ from custom_components.soular.const import (
 )
 from custom_components.soular.coordinator.actuals import Learner
 from custom_components.soular.coordinator.coordinator import SoularCoordinator
+from custom_components.soular.core import band as band_codec
 from custom_components.soular.core.shading import TransmittanceGrid
-from custom_components.soular.learning.store import SAVE_INTERVAL, build_store, decode, encode
+from custom_components.soular.learning.store import SAVE_INTERVAL, build_band_store, build_store, decode, encode
 from custom_components.soular.system import build_system, load_all_shading, site_name
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
@@ -63,6 +64,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SoularConfigEntry) -> bo
 
     store = build_store(hass, entry.entry_id)
     learner = Learner(states=decode(await store.async_load()))
+    band_store = build_band_store(hass, entry.entry_id)
+    band = band_codec.decode(await band_store.async_load())
 
     power_sensors = {
         str(subentry.title): str(subentry.data[CONF_POWER_SENSOR])
@@ -77,6 +80,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SoularConfigEntry) -> bo
         power_sensors=power_sensors,
         soc_sensor=entry.data.get(CONF_BATTERY_SOC_SENSOR),
         learner=learner,
+        band=band,
     )
     entry.runtime_data = SoularRuntimeData(coordinator=coordinator, shading=shading)
 
@@ -89,6 +93,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SoularConfigEntry) -> bo
     @callback
     def save(*_: object) -> None:
         store.async_delay_save(lambda: encode(learner.states), 0)
+        band_store.async_delay_save(lambda: band_codec.encode(band), 0)
 
     @callback
     def save_on_stop(_event: Event) -> None:

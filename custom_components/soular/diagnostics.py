@@ -78,6 +78,10 @@ async def async_get_config_entry_diagnostics(
             else None,
             "weather_error": coordinator.weather_error,
         }
+        diagnostics["band"] = [
+            {"lead": lead, "p10": round(b.low, 3), "p90": round(b.high, 3), "samples": b.samples}
+            for lead, b in enumerate(coordinator.band_bounds)
+        ]
         result = coordinator.data
         if coordinator.last_update_success:
             diagnostics["forecast"] = {

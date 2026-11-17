@@ -98,3 +98,10 @@ def build_store(hass: HomeAssistant, entry_id: str) -> Store[LearningStateDict]:
         f"{DOMAIN}.learning.{entry_id}",
         minor_version=STORAGE_MINOR_VERSION,
     )
+
+
+def build_band_store(hass: HomeAssistant, entry_id: str) -> Store[dict[str, Any]]:
+    """Create the store for one config entry's forecast band record."""
+    return Store[dict[str, Any]](
+        hass, STORAGE_VERSION, f"{DOMAIN}.band.{entry_id}", minor_version=STORAGE_MINOR_VERSION
+    )

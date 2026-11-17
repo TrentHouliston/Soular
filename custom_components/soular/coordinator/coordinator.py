@@ -32,8 +32,10 @@ from custom_components.soular.coordinator.backfill import (
     backfill_window,
     replay,
 )
+from custom_components.soular.core.band import BAND_LEADS, BandTracker, Bounds, hourly_snapshot
 from custom_components.soular.core.correction import build_features
 from custom_components.soular.core.geometry import solar_geometry
+from custom_components.soular.core.mask import CURTAILMENT_SOC_PCT
 from custom_components.soular.core.nwp import weather_from_hourly
 from custom_components.soular.core.pipeline import ArrayForecast, ForecastResult, SystemSpec, build_time_grid, forecast
 from custom_components.soular.sources.open_meteo import HourlyWeather, OpenMeteoError, fetch
@@ -57,6 +59,7 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
         power_sensors: dict[str, str] | None = None,
         soc_sensor: str | None = None,
         learner: Learner | None = None,
+        band: BandTracker | None = None,
     ) -> None:
         """Set up the coordinator for a configured system."""
         super().__init__(hass, _LOGGER, name=f"{DOMAIN} {name}", update_interval=RECOMPUTE_INTERVAL)
@@ -64,6 +67,8 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
         self.power_sensors = power_sensors or {}
         self.soc_sensor = soc_sensor
         self.learner = learner or Learner()
+        self.band = band or BandTracker()
+        self._bounds: tuple[Bounds, ...] = self.band.bounds(dt_util.now().date().toordinal())
         self._weather: HourlyWeather | None = None
         self._weather_at: datetime | None = None
         self._weather_error: str | None = None
@@ -73,6 +78,16 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
     def weather_fetched_at(self) -> datetime | None:
         """When the underlying forecast was last successfully retrieved."""
         return self._weather_at
+
+    @property
+    def band_bounds(self) -> tuple[Bounds, ...]:
+        """The P10/P90 band for today and each day after, as ratios to the forecast."""
+        return self._bounds
+
+    @property
+    def band_samples(self) -> int:
+        """How many of this site's own daily ratios are behind tomorrow's band."""
+        return self._bounds[1].samples
 
     @property
     def weather_error(self) -> str | None:
@@ -256,4 +271,35 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
         if measured:
             self._learn(result, series.ghi, measured, soc)
 
-        return self._correct(result, forecast_clearness(grid.times, self.system, series.ghi))
+        result = self._correct(result, forecast_clearness(grid.times, self.system, series.ghi))
+        self._track_band(result, measured or {}, soc)
+        return result
+
+    def _track_band(self, result: ForecastResult, measured: dict[str, float | None], soc: float | None) -> None:
+        """Compare the day's output with the forecasts made for it, and refresh the band.
+
+        Measured against the arrays that have a power sensor, on both sides, so an
+        array without one neither inflates the forecast nor goes missing from the
+        actual. Without any, the band stays at its starting width.
+        """
+        today = dt_util.now()
+        day = today.date().toordinal()
+        midnight = dt_util.start_of_local_day(today)
+        start = int(midnight.timestamp())
+        end = int(dt_util.start_of_local_day(today.date() + timedelta(days=1)).timestamp())
+
+        sensed = [entry for entry in result.arrays if entry.name in self.power_sensors]
+        if sensed:
+            snapshot = None
+            if day not in self.band.snapshots:
+                power = np.sum([entry.dc_power_w for entry in sensed], axis=0)
+                # One hour spare, for the day the clocks go back.
+                snapshot = hourly_snapshot(day, start, result.times, power, hours=BAND_LEADS * 24 + 1)
+            self.band.start_day(day, start, end, snapshot)
+
+            readings = [measured.get(entry.name) for entry in sensed]
+            usable = all(value is not None for value in readings) and (soc is None or soc < CURTAILMENT_SOC_PCT)
+            total = float(sum(value for value in readings if value is not None)) if usable else None
+            self.band.tick(int(dt_util.utcnow().timestamp()), total)
+
+        self._bounds = self.band.bounds(day)
