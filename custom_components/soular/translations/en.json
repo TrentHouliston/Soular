@@ -113,7 +113,7 @@
       },
       "title": "Solar array"
     },
-    "site": { "entry_type": "Site total" }
+    "site": { "entry_type": "Site total", "initiate_flow": { "user": "Site total" }, "step": {} }
   },
   "entity": {
     "sensor": {
