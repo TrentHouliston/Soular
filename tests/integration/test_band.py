@@ -15,8 +15,8 @@ from custom_components.soular.const import CONF_POWER_SENSOR
 from custom_components.soular.core.band import MAX_TICK_SECONDS, PRIOR
 from tests.integration.conftest import ARRAY_DATA, build_entry
 
-SITE = "sensor.morisset_park_estimated"
-POWER = f"{SITE}_power_production_now"
+EAST = "sensor.morisset_park_east_estimated"
+POWER = f"{EAST}_power_production_now"
 
 
 def attributes(hass: HomeAssistant, entity_id: str) -> dict[str, Any]:
@@ -57,10 +57,12 @@ async def test_the_power_band_is_one_coherent_day(hass: HomeAssistant, configure
     assert ratios == {PRIOR[1][0]}
 
 
-async def test_daily_totals_carry_their_band(hass: HomeAssistant, configured: MockConfigEntry) -> None:
-    """Each site daily total names its P10 and P90 the way Solcast does."""
+async def test_daily_totals_carry_their_band(
+    hass: HomeAssistant, entity_registry_enabled_by_default: None, configured: MockConfigEntry
+) -> None:
+    """Each daily total names its P10 and P90 the way Solcast does."""
     for key, lead in (("today", 0), ("tomorrow", 1), ("d7", 7)):
-        entity = f"{SITE}_energy_production_{key}" if key != "d7" else f"{SITE}_energy_production_7_days_from_now"
+        entity = f"{EAST}_energy_production_{key}" if key != "d7" else f"{EAST}_energy_production_7_days_from_now"
         state = hass.states.get(entity)
         assert state is not None, entity
         value = float(state.state)
@@ -70,23 +72,13 @@ async def test_daily_totals_carry_their_band(hass: HomeAssistant, configured: Mo
         assert state.attributes["band_calibrated"] is False
 
 
-async def test_arrays_carry_no_band(hass: HomeAssistant, configured: MockConfigEntry) -> None:
-    """The band is measured on the site's output, so it is not claimed per array."""
+async def test_every_array_carries_the_band(hass: HomeAssistant, configured: MockConfigEntry) -> None:
+    """With no site total, each array has its own P10 and P90 copies, scaled alike."""
     registry = er.async_get(hass)
     keys = {entity.unique_id for entity in er.async_entries_for_config_entry(registry, configured.entry_id)}
-    assert sum(key.endswith("power_production_now_p10") for key in keys) == 1
-    tomorrow = attributes(hass, "sensor.morisset_park_east_estimated_energy_production_tomorrow")
-    assert "estimate10" not in tomorrow
-
-
-async def test_the_calibration_diagnostic_starts_disabled(hass: HomeAssistant, configured: MockConfigEntry) -> None:
-    """How much history is behind the band is there for whoever asks."""
-    registry = er.async_get(hass)
-    entity_id = registry.async_get_entity_id("sensor", "soular", f"{configured.entry_id}_band_samples")
-    assert entity_id is not None
-    entry = registry.async_get(entity_id)
-    assert entry is not None
-    assert entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+    assert sum(key.endswith("power_production_now_p10") for key in keys) == len(configured.subentries)
+    tomorrow = attributes(hass, "sensor.morisset_park_west_estimated_energy_production_tomorrow")
+    assert tomorrow["estimate10"] < tomorrow["estimate90"]
 
 
 async def test_a_measured_day_becomes_a_ratio(hass: HomeAssistant, mock_weather: Any, freezer: Any) -> None:

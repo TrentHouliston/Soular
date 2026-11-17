@@ -57,9 +57,9 @@ def haeo_detects(attributes: Mapping[str, Any]) -> bool:
 
 @pytest.fixture
 def forecast_attributes(hass: HomeAssistant, configured: MockConfigEntry) -> Mapping[str, Any]:
-    """Return the site power sensor's attributes."""
-    state = hass.states.get("sensor.morisset_park_estimated_power_production_now")
-    assert state is not None, "the site power sensor should exist"
+    """Return an array power sensor's attributes."""
+    state = hass.states.get("sensor.morisset_park_east_estimated_power_production_now")
+    assert state is not None, "the array power sensor should exist"
     return state.attributes
 
 

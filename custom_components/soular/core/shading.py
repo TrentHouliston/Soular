@@ -40,6 +40,11 @@ class ShadingFormatError(ValueError):
     """A shading file could not be parsed, or did not contain the named array."""
 
 
+# A stored efficiency outside this is a broken build, not the panels.
+MIN_EFFICIENCY = 0.5
+MAX_EFFICIENCY = 1.5
+
+
 @dataclass(frozen=True, slots=True)
 class TransmittanceGrid:
     """Beam transmittance on an azimuth x elevation grid, stored as 8-bit.
@@ -47,11 +52,28 @@ class TransmittanceGrid:
     ``azimuth_deg`` is compass degrees from north, clockwise, ascending and
     within [0, 360). ``elevation_deg`` is degrees above the horizon, ascending.
     ``values`` is indexed ``[azimuth, elevation]``.
+
+    ``efficiency`` is what the array delivers under a clear, unshaded sky over
+    what the model predicts for it, measured by the map builder from the same
+    clear-sky record the map is built from. The map is normalised to exactly 1
+    in open sky, so this is the part of the measurement the map divides out:
+    soiling, module tolerance, wiring, and the clear-sky model's own bias. It
+    was measured with ``efficiency_dc_loss`` configured, so a different DC loss
+    configured on the array is compensated rather than counted twice. ``None``
+    for maps that do not carry one.
     """
 
     azimuth_deg: FloatArray
     elevation_deg: FloatArray
     values: NDArray[np.uint8]
+    efficiency: float | None = None
+    efficiency_dc_loss: float = 0.0
+
+    def efficiency_for(self, dc_loss_fraction: float) -> float:
+        """Return the multiplier for an array configured with ``dc_loss_fraction``."""
+        if self.efficiency is None or dc_loss_fraction >= 1.0:
+            return 1.0
+        return self.efficiency * (1.0 - self.efficiency_dc_loss) / (1.0 - dc_loss_fraction)
 
     def __post_init__(self) -> None:
         """Validate axis ordering and shape."""
@@ -123,7 +145,9 @@ def from_npz(data: bytes, array_name: str) -> TransmittanceGrid:
     """Parse a graded grid from a ``.npz`` archive.
 
     Expects ``azimuth_deg``, ``elevation_deg`` and ``T_<array_name>``, matching
-    the layout produced by the site analysis.
+    the layout produced by the site analysis. ``efficiency_<array_name>`` and
+    ``efficiency_dc_loss`` are optional; maps built before they existed load
+    without an efficiency.
     """
     key = f"T_{array_name}"
     with np.load(io.BytesIO(data), allow_pickle=False) as archive:
@@ -135,9 +159,21 @@ def from_npz(data: bytes, array_name: str) -> TransmittanceGrid:
         azimuth = np.asarray(archive["azimuth_deg"], dtype=np.float64)
         elevation = np.asarray(archive["elevation_deg"], dtype=np.float64)
         values = _quantise(np.asarray(archive[key], dtype=np.float64))
+        efficiency_key = f"efficiency_{array_name}"
+        efficiency = float(archive[efficiency_key]) if efficiency_key in available else None
+        dc_loss = float(archive["efficiency_dc_loss"]) if "efficiency_dc_loss" in available else 0.0
 
+    if efficiency is not None and not (MIN_EFFICIENCY <= efficiency <= MAX_EFFICIENCY):
+        msg = f"efficiency {efficiency:.3f} for {array_name!r} is outside {MIN_EFFICIENCY}-{MAX_EFFICIENCY}"
+        raise ShadingFormatError(msg)
     azimuth, values = _drop_duplicate_endpoint(azimuth, values)
-    return TransmittanceGrid(azimuth_deg=azimuth, elevation_deg=elevation, values=values)
+    return TransmittanceGrid(
+        azimuth_deg=azimuth,
+        elevation_deg=elevation,
+        values=values,
+        efficiency=efficiency,
+        efficiency_dc_loss=dc_loss,
+    )
 
 
 def from_csv(text: str, array_name: str) -> TransmittanceGrid:

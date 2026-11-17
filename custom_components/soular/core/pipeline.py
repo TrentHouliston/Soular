@@ -199,6 +199,10 @@ def forecast(system: SystemSpec, grid: TimeGrid, weather: WeatherSeries) -> Fore
 
         temp_cell = cell_temperature(poa_effective, weather.temp_air, weather.wind_speed_10m, array)
         dc = dc_power(poa_effective, temp_cell, array)
+        # What the map builder measured this array delivering under a clear sky,
+        # over what the model predicts: a property of the panels, not the weather.
+        if shading is not None:
+            dc = dc * shading.efficiency_for(array.dc_loss_fraction)
 
         dc_by_array[array.name] = dc
         parts[array.name] = (poa_effective, poa.poa_beam * transmittance, temp_cell, transmittance)

@@ -17,7 +17,7 @@ from custom_components.soular.core.clearsky import clear_sky
 from custom_components.soular.core.geometry import solar_geometry
 from custom_components.soular.core.irradiance import plane_of_array
 from custom_components.soular.core.shading import from_npz
-from tools.shading import grid
+from tools.shading import efficiency, grid
 from tools.shading.cli import _npz_bytes
 from tools.shading.horizon import fit, read_horizon
 from tools.shading.samples import build_samples, read_power
@@ -127,3 +127,26 @@ def test_the_written_map_has_the_axes_the_integration_expects() -> None:
     assert payload["azimuth_deg"][-1] == 360.0
     assert payload["elevation_deg"][-1] == 90.0
     assert payload["T_roof"].shape == (361, 91)
+
+
+def test_the_efficiency_follows_the_measured_power(synthetic: tuple[Path, pd.DataFrame, pd.Series]) -> None:
+    """Measured against the integration's own model: plausible, and proportional to what was produced."""
+    path, power, satellite = synthetic
+    site = load_site(path, ac_limit_w=1.0)
+    samples = build_samples(site, power, satellite)
+    train = samples.arrays["roof"].loc[~samples.arrays["roof"]["holdout"].to_numpy(dtype=bool)]
+    field = grid.build(train, fit(train))
+    maps = {"roof": from_npz(_npz_bytes({"roof": field}), "roof")}
+
+    full = efficiency.measure(site, samples.arrays, maps)["roof"]
+    dimmer = efficiency.measure(site, build_samples(site, power * 0.9, satellite).arrays, maps)["roof"]
+    assert 0.7 < full < 1.3
+    assert dimmer == pytest.approx(0.9 * full, rel=0.01)
+
+
+def test_the_written_map_carries_the_efficiency() -> None:
+    """What the builder measured is what the integration reads back."""
+    payload = _npz_bytes({"roof": np.ones((361, 91))}, {"roof": 0.97}, 0.14)
+    loaded = from_npz(payload, "roof")
+    assert loaded.efficiency == pytest.approx(0.97)
+    assert loaded.efficiency_dc_loss == pytest.approx(0.14)

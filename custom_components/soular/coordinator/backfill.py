@@ -1,10 +1,10 @@
-"""Catch a fresh array's correction up from the recorder.
+"""Catch a fresh weather correction up from the recorder.
 
-Live sampling alone takes days of daylight to calibrate a new install, but Home
-Assistant has usually been recording the array's output for far longer than
-Soular has been installed. This replays that history through the same learner,
-once, for arrays that have learned nothing yet -- not on every restart, which
-is what would make the history query a cost.
+Live sampling alone takes weeks to say anything about the weather forecast's
+bias, but Home Assistant has usually been recording the arrays' output for far
+longer than Soular has been installed. This replays that history into the same
+record, once, while the record is empty -- not on every restart, which is what
+would make the history query a cost.
 
 The recorder's five-minute statistics are used rather than raw state history:
 one mean per sensor per five minutes is exactly the learner's own cadence, a
@@ -12,7 +12,7 @@ week of it is a couple of thousand rows instead of hundreds of thousands, and
 the recorder converts kW to W on the way out.
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 import logging
 from typing import Any
@@ -20,10 +20,12 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 import numpy as np
 
-from custom_components.soular.coordinator.actuals import Learner, samples_from
+from custom_components.soular.coordinator.actuals import forecast_clearness
+from custom_components.soular.core.mask import CURTAILMENT_SOC_PCT
 from custom_components.soular.core.nwp import weather_from_hourly
 from custom_components.soular.core.pipeline import SystemSpec, forecast
 from custom_components.soular.core.types import TimeGrid
+from custom_components.soular.core.weather_bias import WeatherBias
 from custom_components.soular.sources.open_meteo import HourlyWeather
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,15 +36,6 @@ BACKFILL_DAYS = 7
 PERIOD_SECONDS = 300
 
 type Series = dict[int, float]
-
-
-def arrays_to_backfill(learner: Learner, power_sensors: Mapping[str, str]) -> dict[str, str]:
-    """Return the arrays with a power sensor and nothing learned yet."""
-    return {
-        name: entity
-        for name, entity in power_sensors.items()
-        if name not in learner.states or learner.states[name].samples == 0
-    }
 
 
 async def async_read_history(
@@ -80,18 +73,20 @@ async def async_read_history(
 
 
 def replay(
-    learner: Learner,
+    bias: WeatherBias,
     system: SystemSpec,
     weather: HourlyWeather,
     arrays: Mapping[str, str],
     history: Mapping[str, Series],
     soc: Series | None,
+    local_day: Callable[[int], int],
 ) -> int:
-    """Fold recorded output into the learner, oldest first. Blocking.
+    """Fold recorded output into the weather correction, by local day. Blocking.
 
     Each five-minute mean is compared against the model at the middle of its
-    period, run on the weather Open-Meteo has for that time. Returns how many
-    samples were offered to the learner (the mask still decides which count).
+    period, run on the weather Open-Meteo has for that time, for the arrays
+    together. An instant counts only with every array read and the battery not
+    full. Returns how many instants counted.
     """
     stamps = sorted({stamp for entity in arrays.values() for stamp in history.get(entity, {})})
     if not stamps:
@@ -117,18 +112,23 @@ def replay(
         diffuse=weather.diffuse,
     )
     result = forecast(system, grid, series)
-    samples = samples_from(result, system, series.ghi, np.arange(times.size))
+    predicted = np.sum([entry.dc_power_w for entry in result.arrays if entry.name in arrays], axis=0)
+    clearness = forecast_clearness(times, system, series.ghi)
 
-    offered = 0
-    for k, start in enumerate(starts.tolist()):
-        charge = None if soc is None else soc.get(start)
-        for name, entity in arrays.items():
-            measured = history.get(entity, {}).get(start)
-            if measured is None or name not in samples:
-                continue
-            learner.observe(name, samples[name][k], measured, charge)
-            offered += 1
-    return offered
+    measured = np.full(times.size, np.nan)
+    readings = np.array([[history.get(entity, {}).get(int(s), np.nan) for s in starts] for entity in arrays.values()])
+    complete = np.isfinite(readings).all(axis=0)
+    measured[complete] = readings[:, complete].sum(axis=0)
+    if soc is not None:
+        charge = np.array([soc.get(int(s), np.nan) for s in starts])
+        complete &= ~(charge >= CURTAILMENT_SOC_PCT)
+
+    days = np.array([local_day(int(s)) for s in starts])
+    hours = PERIOD_SECONDS / 3600.0
+    for day in np.unique(days[complete]):
+        keep = complete & (days == day)
+        bias.add(int(day), clearness[keep], predicted[keep], measured[keep], hours)
+    return int(complete.sum())
 
 
 def backfill_window(now: datetime) -> tuple[datetime, datetime]:

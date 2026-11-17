@@ -8,6 +8,7 @@ forecast currently look like.
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 import numpy as np
 
 from custom_components.soular import SoularConfigEntry
@@ -47,6 +48,9 @@ async def async_get_config_entry_diagnostics(
             "gamma_pdc": array.gamma_pdc,
             "dc_loss_fraction": array.dc_loss_fraction,
             "shading_loaded": array.name in system.shading,
+            "panel_efficiency": system.shading[array.name].efficiency_for(array.dc_loss_fraction)
+            if array.name in system.shading
+            else None,
         }
         for array in system.arrays
     ]
@@ -77,6 +81,11 @@ async def async_get_config_entry_diagnostics(
             if coordinator.weather_fetched_at
             else None,
             "weather_error": coordinator.weather_error,
+        }
+        today = dt_util.now().date().toordinal()
+        diagnostics["weather_correction"] = {
+            "days": coordinator.weather_bias.day_count,
+            "by_forecast_clearness": [round(float(r), 3) for r in coordinator.weather_bias.bin_ratios(today)],
         }
         diagnostics["band"] = [
             {"lead": lead, "p10": round(b.low, 3), "p90": round(b.high, 3), "samples": b.samples}

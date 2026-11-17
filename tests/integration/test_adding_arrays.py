@@ -63,7 +63,7 @@ async def test_arrays_added_during_setup_are_all_forecast(hass: HomeAssistant) -
         for entity in er.async_entries_for_config_entry(registry, entry.entry_id)
         if entity.platform == DOMAIN and entity.unique_id.endswith("power_production_now")
     ]
-    assert len(power) == len(ARRAY_DATA) + 1
+    assert len(power) == len(ARRAY_DATA)
     for entity_id in power:
         state = hass.states.get(entity_id)
         assert state is not None

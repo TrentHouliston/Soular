@@ -1,14 +1,8 @@
 {
   "entity": {
     "sensor": {
-      "band_samples": {
-        "default": "mdi:chart-bell-curve"
-      },
       "cell_temperature": {
         "default": "mdi:thermometer"
-      },
-      "correction_factor": {
-        "default": "mdi:tune-variant"
       },
       "energy_current_hour": {
         "default": "mdi:clock-outline"
@@ -46,8 +40,8 @@
       "last_update_forecast": {
         "default": "mdi:cloud-download-outline"
       },
-      "learning_samples": {
-        "default": "mdi:counter"
+      "panel_efficiency": {
+        "default": "mdi:solar-panel"
       },
       "poa_irradiance": {
         "default": "mdi:sun-wireless"
@@ -69,6 +63,9 @@
       },
       "shading_transmittance": {
         "default": "mdi:tree-outline"
+      },
+      "weather_correction": {
+        "default": "mdi:weather-partly-cloudy"
       }
     }
   }
