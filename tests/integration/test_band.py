@@ -12,8 +12,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.soular.const import CONF_POWER_SENSOR
-from custom_components.soular.core import band as band_module
-from custom_components.soular.core.band import PRIOR
+from custom_components.soular.core.band import MAX_TICK_SECONDS, PRIOR
 from tests.integration.conftest import ARRAY_DATA, build_entry
 
 SITE = "sensor.morisset_park_estimated"
@@ -90,14 +89,14 @@ async def test_the_calibration_diagnostic_starts_disabled(hass: HomeAssistant, c
     assert entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
 
 
-async def test_a_measured_day_becomes_a_ratio(
-    hass: HomeAssistant, mock_weather: Any, freezer: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A day of readings, compared with the midnight forecast, yields that day's ratio."""
-    # Half-hour steps keep a simulated day quick; each refresh rewrites the
-    # forecast series of three sensors.
-    step = 1800
-    monkeypatch.setattr(band_module, "MAX_TICK_SECONDS", step)
+async def test_a_measured_day_becomes_a_ratio(hass: HomeAssistant, mock_weather: Any, freezer: Any) -> None:
+    """A day of readings, compared with the midnight forecast, yields that day's ratio.
+
+    Setup and the first update after midnight go through the real update path,
+    reading the power sensors; the readings in between are fed to the tracker
+    directly, because recomputing the forecast every ten minutes of a simulated
+    day is too slow for a CI runner.
+    """
     await hass.config.async_set_time_zone("Australia/Sydney")
     freezer.move_to(dt_util.start_of_local_day() + timedelta(minutes=1))
     arrays = tuple({**array, CONF_POWER_SENSOR: f"sensor.pv_{array['name']}"} for array in ARRAY_DATA)
@@ -111,17 +110,18 @@ async def test_a_measured_day_becomes_a_ratio(
     coordinator = entry.runtime_data.coordinator
     band = coordinator.band
     day = dt_util.now().date().toordinal()
+    assert band.ledger is not None
     forecast_wh = band.snapshots[day].energy_wh(band.ledger.start, band.ledger.end)
     assert forecast_wh > 0
 
     # Daylight only: the night carries no forecast energy, so skipping it costs
     # the usable share nothing.
     midnight = dt_util.start_of_local_day()
+    readings = {str(array["name"]): 1000.0 for array in ARRAY_DATA}
     freezer.move_to(midnight + timedelta(hours=5))
-    await coordinator.async_refresh()
-    for _ in range(15 * 3600 // step):
-        freezer.tick(timedelta(seconds=step))
-        await coordinator.async_refresh()
+    for _ in range(15 * 3600 // MAX_TICK_SECONDS + 1):
+        coordinator._track_band(coordinator.data, readings, None)
+        freezer.tick(timedelta(seconds=MAX_TICK_SECONDS))
     freezer.move_to(dt_util.start_of_local_day(midnight.date() + timedelta(days=1)) + timedelta(minutes=1))
     await coordinator.async_refresh()
 
