@@ -69,6 +69,11 @@ class SoularSensorEntityDescription(SensorEntityDescription):
     # Whether the per-array copy starts enabled. The days past tomorrow are a
     # site-level planning number; six more sensors on every array is clutter.
     array_enabled_default: bool = True
+    # A daily total's distance in days from today, which picks its P10/P90 band.
+    lead: int | None = None
+    # A pessimistic or optimistic copy of the power forecast: 0 scales each day
+    # by its P10 ratio, 1 by its P90 ratio.
+    bound: int | None = None
 
 
 def _peak(times: TimeArray, power: FloatArray, start: np.datetime64, end: np.datetime64) -> dt.datetime | None:
@@ -90,12 +95,28 @@ SENSOR_DESCRIPTIONS: Final[tuple[SoularSensorEntityDescription, ...]] = (
         carries_forecast=True,
         value=lambda times, power, window: power_at(times, power, window.now),
     ),
+    *(
+        SoularSensorEntityDescription(
+            key=f"power_production_now_{name}",
+            translation_key=f"power_production_now_{name}",
+            device_class=SensorDeviceClass.POWER,
+            state_class=SensorStateClass.MEASUREMENT,
+            native_unit_of_measurement=UnitOfPower.WATT,
+            suggested_display_precision=0,
+            carries_forecast=True,
+            site_only=True,
+            bound=bound,
+            value=lambda times, power, window: power_at(times, power, window.now),
+        )
+        for bound, name in enumerate(("p10", "p90"))
+    ),
     SoularSensorEntityDescription(
         key="energy_production_today",
         translation_key="energy_production_today",
         device_class=SensorDeviceClass.ENERGY,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         suggested_display_precision=1,
+        lead=0,
         value=lambda times, power, window: energy_between(times, power, window.today_start, window.today_end),
     ),
     SoularSensorEntityDescription(
@@ -112,6 +133,7 @@ SENSOR_DESCRIPTIONS: Final[tuple[SoularSensorEntityDescription, ...]] = (
         device_class=SensorDeviceClass.ENERGY,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         suggested_display_precision=1,
+        lead=1,
         value=lambda times, power, window: energy_between(times, power, window.today_end, window.tomorrow_end),
     ),
     *(
@@ -122,6 +144,7 @@ SENSOR_DESCRIPTIONS: Final[tuple[SoularSensorEntityDescription, ...]] = (
             native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
             suggested_display_precision=1,
             array_enabled_default=False,
+            lead=offset,
             value=lambda times, power, window, offset=offset: energy_between(times, power, *window.day(offset)),
         )
         for offset in FURTHER_DAYS
@@ -253,6 +276,14 @@ SITE_DIAGNOSTICS: Final[tuple[SiteDiagnosticDescription, ...]] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
         attribute="weather_fetched_at",
+    ),
+    SiteDiagnosticDescription(
+        key="band_samples",
+        translation_key="band_samples",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        attribute="band_samples",
     ),
 )
 

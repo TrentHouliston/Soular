@@ -1,6 +1,9 @@
 {
   "entity": {
     "sensor": {
+      "band_samples": {
+        "default": "mdi:chart-bell-curve"
+      },
       "cell_temperature": {
         "default": "mdi:thermometer"
       },
@@ -57,6 +60,12 @@
       },
       "power_production_now": {
         "default": "mdi:solar-power"
+      },
+      "power_production_now_p10": {
+        "default": "mdi:arrow-collapse-down"
+      },
+      "power_production_now_p90": {
+        "default": "mdi:arrow-collapse-up"
       },
       "shading_transmittance": {
         "default": "mdi:tree-outline"

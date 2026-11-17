@@ -10,6 +10,7 @@ from homeassistant.util import dt as dt_util
 import numpy as np
 
 from custom_components.soular.coordinator.coordinator import SoularCoordinator
+from custom_components.soular.core.band import scale_by_day
 from custom_components.soular.core.series import power_at
 from custom_components.soular.core.types import FloatArray, TimeArray
 from custom_components.soular.entities import (
@@ -89,7 +90,12 @@ class SoularForecastSensor(SoularSensorBase):
         """Return the times and power this entity reports on."""
         result = self.coordinator.data
         if self._array is None:
-            return result.times, result.ac_power_w
+            bound = self.entity_description.bound
+            if bound is None:
+                return result.times, result.ac_power_w
+            ratios = tuple(b.high if bound else b.low for b in self.coordinator.band_bounds)
+            scale = scale_by_day(result.times, local_window(result.times).midnights, ratios)
+            return result.times, result.ac_power_w * scale
         try:
             return result.times, result.array(self._array).ac_power_w
         except KeyError:
@@ -124,7 +130,7 @@ class SoularForecastSensor(SoularSensorBase):
         mid-day gets this morning spliced onto its end.
         """
         if not self.entity_description.carries_forecast:
-            return None
+            return self._band_attributes()
         series = self._series
         if series is None:
             return None
@@ -146,6 +152,25 @@ class SoularForecastSensor(SoularSensorBase):
             "unit_of_measurement": "W",
             "device_class": "power",
             "interpolation_mode": "linear",
+        }
+
+    def _band_attributes(self) -> dict[str, Any] | None:
+        """Attach a site daily total's P10 and P90, as Solcast names them.
+
+        Only on the site: the band is measured against the site's output, and
+        nothing has checked whether it holds for one array on its own.
+        """
+        lead = self.entity_description.lead
+        if self._array is not None or lead is None:
+            return None
+        value = self.native_value
+        if not isinstance(value, float):
+            return None
+        bounds = self.coordinator.band_bounds[lead]
+        return {
+            "estimate10": round(value * bounds.low, 2),
+            "estimate90": round(value * bounds.high, 2),
+            "band_calibrated": bounds.calibrated,
         }
 
 

@@ -100,13 +100,14 @@ per-array power, so the sun has visited every part of the sky it ever will.
 
 On the site device, under the **Total** subentry beside your arrays:
 
-| Entity                                                                 |                                                                                          |
-| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| **Estimated power production - now**                                   | The current forecast, and the entity carrying the full eight-day series as an attribute. |
-| **Estimated energy production - today / remaining today / tomorrow**   | Daily totals in kWh.                                                                     |
-| **Estimated energy production - day after tomorrow … 7 days from now** | The week ahead, one daily total each, as `open_meteo_solar_forecast` has.                |
-| **Estimated energy production - this hour / next hour**                | Disabled by default.                                                                     |
-| **Highest power peak time - today / tomorrow**                         | When the peak lands.                                                                     |
+| Entity                                                                 |                                                                                           |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **Estimated power production - now**                                   | The current forecast, and the entity carrying the full eight-day series as an attribute.  |
+| **Estimated energy production - today / remaining today / tomorrow**   | Daily totals in kWh.                                                                      |
+| **Estimated energy production - day after tomorrow … 7 days from now** | The week ahead, one daily total each, as `open_meteo_solar_forecast` has.                 |
+| **Estimated energy production - this hour / next hour**                | Disabled by default.                                                                      |
+| **Highest power peak time - today / tomorrow**                         | When the peak lands.                                                                      |
+| **Estimated power production - now (P10) / (P90)**                     | A poor and a good version of the forecast, each with its own eight-day series. See below. |
 
 The series is five-minute steps for the first six hours, quarter-hours out to two
 days, and half-hours beyond that.
@@ -115,8 +116,43 @@ Each array gets the same power and energy sensors for its own plane (the days pa
 tomorrow start disabled there), plus diagnostics that start disabled: plane-of-array irradiance, cell temperature,
 shading transmittance, the learned correction and how many samples are behind it.
 
-A site diagnostic, also disabled by default, reports when the weather was last
-fetched.
+Site diagnostics, also disabled by default, report when the weather was last
+fetched and how many of the site's own daily results are behind the band.
+
+### The P10/P90 band
+
+Each of the site's daily totals carries `estimate10` and `estimate90` attributes,
+named as Solcast names them. On nine days in ten the day's production should come
+in above `estimate10`, and on nine in ten below `estimate90`. `band_calibrated`
+says whether the band comes from this site's own record yet.
+
+The band comes from how far this site's actual production has landed from
+Soular's forecast, not from a weather ensemble. Open-Meteo keeps no archive of
+its ensemble runs, so a band built that way could never be checked. This one can.
+In a year-long replay at the reference site, using only results known before each
+forecast, 10% of days fell below P10 and 11% above P90, from one to seven days
+ahead.
+
+How it works:
+
+- Each midnight Soular keeps the forecast it has just made for the next eight
+    days.
+- Through each day it compares that forecast with what the arrays actually
+    produce. Instants when the battery is full are left out on both sides, because
+    the inverter is throttling the panels then.
+- The band for each lead is the 10th and 90th percentile of the last 60 days'
+    ratios. A lead is pooled with the ones either side of it for a usable sample
+    size.
+
+It needs a **Measured power** sensor on at least one array, and a **Battery state
+of charge** sensor if there is a battery. Until a lead has 15 results, it uses a
+starting band from the reference site, which is about −40% to +35% for tomorrow.
+
+The P10 and P90 power sensors scale each day's forecast by that day's ratio.
+Their series is one coherent poor (or good) day, not every interval at its worst
+at once, so integrating the P10 series over a day gives that day's
+`estimate10`. The band is measured on the whole site's output, so arrays don't
+get one.
 
 ## Wiring it up
 
@@ -129,6 +165,9 @@ the site's hourly forecast.
 forecast format — the series with units and interpolation mode — starting at
 now and spanning a whole number of days (eight), which is what haeo's forecast
 cycle expects. haeo uses as much of it as its own horizon covers.
+
+To plan against a poor day instead, point it at
+`sensor.<site>_estimated_power_production_now_p10`, which has the same format.
 
 ## How often it updates
 

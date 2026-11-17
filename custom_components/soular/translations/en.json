@@ -117,6 +117,7 @@
   },
   "entity": {
     "sensor": {
+      "band_samples": { "name": "Forecast band samples" },
       "cell_temperature": { "name": "Cell temperature" },
       "correction_factor": { "name": "Learned correction" },
       "energy_current_hour": { "name": "Estimated energy production - this hour" },
@@ -136,6 +137,8 @@
       "power_highest_peak_time_today": { "name": "Highest power peak time - today" },
       "power_highest_peak_time_tomorrow": { "name": "Highest power peak time - tomorrow" },
       "power_production_now": { "name": "Estimated power production - now" },
+      "power_production_now_p10": { "name": "Estimated power production - now (P10)" },
+      "power_production_now_p90": { "name": "Estimated power production - now (P90)" },
       "shading_transmittance": { "name": "Shading transmittance" }
     }
   },
