@@ -187,6 +187,73 @@ sub-pixel cloud, the 10-minute satellite cadence against five-minute production,
 module-level effects the model does not represent, and the shading map's own
 ±25% absolute accuracy.
 
+## Calibration: the panels and the weather, separately
+
+The original online correction was one per-array regression on eight features:
+an intercept, sun elevation, forecast clearness, its square, an annual cosine
+and sine, shading transmittance and temperature. Over a year of continuous data
+it calibrated well. From a cold start it did not. Installed in November with a
+week of recorded history behind it, two of those days cloudy, it could not tell
+a weather forecast that promised too much sun from panels that deliver too
+little, and its annual terms -- constant over a week, so indistinguishable from
+the intercept -- turned the shortfall into a November-specific cut. On a clear
+day it then applied its floor of 0.75 to three of four arrays, and Soular came
+in 29% under a day the incumbent missed by 9% in the other direction.
+
+The two effects have different natures, so they are now measured separately.
+
+**The panels.** Measured against the model driven by a clear sky, each array's
+whole-day output on clear days is steady across the year -- every season's 90th
+percentile within ±4% of the year's -- and well above what the regression
+learned. It is a property of the hardware, so the shading-map builder measures it
+once, from the satellite-verified clear samples it already selects, and stores it
+in the map: 0.99, 0.98, 0.96 and 1.04 for east, north, south and west at the
+reference site.
+
+**The weather.** What remains between forecast and meter is the forecast's sky,
+and it is biased: Open-Meteo overshoots, more for broken cloud than for clear. A
+site-wide correction keyed on the forecast's clear-sky index, over a 60-day
+window and pulled towards 1 by about two good days' worth of imaginary evidence
+per bin, captures it.
+
+Day-ahead, as served, on the holdout days of October 2025 to October 2026:
+
+| correction                         | 5-minute RMSE | typical day |  mean day | energy bias |
+| ---------------------------------- | ------------: | ----------: | --------: | ----------: |
+| none                               |       2,147 W |       21.0% |     46.1% |      +27.5% |
+| the eight-feature regression       |       2,104 W |       19.0% |     37.8% |      +15.8% |
+| panel efficiency only              |       2,139 W |       20.7% |     45.5% |      +26.6% |
+| **panel efficiency, then weather** |   **2,078 W** |   **18.4%** | **36.8%** |  **+13.3%** |
+
+Panel efficiency alone barely helps, because the forecast's sky was already too
+bright and an honest efficiency only adds to it. The weather correction is what
+removes the bias, and it does so without having to borrow the panels' term to do
+it.
+
+From a cold start, which is what the regression got wrong, five-minute RMSE over
+the first six weeks:
+
+| start         |    none |  regression | efficiency + weather |
+| ------------- | ------: | ----------: | -------------------: |
+| November 2025 | 1,889 W |     1,909 W |          **1,874 W** |
+| May 2026      | 1,450 W | **1,376 W** |              1,393 W |
+
+The daily percentages in summer are inflated by curtailment -- the battery is
+full most sunny afternoons, and the inverter's daily counter does not know what
+it was throttled out of -- so the five-minute error, which excludes curtailed
+instants, is the fairer measure there.
+
+Two things that were tried and did not survive:
+
+- **A live upper envelope** -- the second-best of the last thirty days' clear-sky
+    ratios. Right in principle, but a cold start has only a week, and requiring
+    most of a day to be uncurtailed excluded exactly the sunny days it needed:
+    the battery fills by late morning in summer. Measuring once from a year of
+    record avoids both.
+- **Fitting the weather correction on a weaker prior.** At a fifth of the final
+    prior it learned a cold start's first cloudy week as the site's climate, the
+    regression's failure in a new place.
+
 ## Caveats
 
 - **Lead time is conservative.** The archive resolves runs to whole days and the

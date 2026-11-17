@@ -2,7 +2,7 @@
 
 from collections.abc import Generator
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 from homeassistant.config_entries import ConfigSubentryData
 from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE, CONF_NAME
@@ -71,6 +71,17 @@ def synthetic_weather(hours: int = 24 * 10, history_hours: int = 24) -> HourlyWe
         temperature=np.full(times.size, 26.0),
         wind_speed_10m=np.full(times.size, 2.5),
     )
+
+
+@pytest.fixture
+def entity_registry_enabled_by_default() -> Generator[None]:
+    """Create every entity enabled, including those that start disabled."""
+    with patch(
+        "homeassistant.helpers.entity.Entity.entity_registry_enabled_default",
+        return_value=True,
+        new_callable=PropertyMock,
+    ):
+        yield
 
 
 @pytest.fixture

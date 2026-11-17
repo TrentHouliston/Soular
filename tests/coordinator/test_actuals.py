@@ -1,12 +1,12 @@
-"""The learner's view of an array must match what the correction is applied against."""
+"""The clearness the weather correction is keyed on."""
 
 import numpy as np
 
-from custom_components.soular.coordinator.actuals import forecast_clearness, samples_from
+from custom_components.soular.coordinator.actuals import forecast_clearness
 from custom_components.soular.core.clearsky import clear_sky
 from custom_components.soular.core.geometry import solar_geometry
 from custom_components.soular.core.nwp import weather_from_hourly
-from custom_components.soular.core.pipeline import SystemSpec, forecast
+from custom_components.soular.core.pipeline import SystemSpec
 from custom_components.soular.core.types import ArraySpec, TimeGrid
 from tests.core.conftest import INVERTER, SITE
 
@@ -18,12 +18,12 @@ ARRAYS = (
 SYSTEM = SystemSpec(site=SITE, arrays=ARRAYS, inverters={"default": INVERTER})
 
 
-def test_every_array_learns_the_clearness_the_correction_is_applied_with() -> None:
-    """On a clear day, every plane's clearness is the sky's, not its own geometry.
+def test_a_clear_sky_reads_as_clear() -> None:
+    """The index is horizontal, so a clear day reads about 1 whatever the planes face.
 
-    Training on a plane-of-array index once taught the west plane that a clear
-    sky ran from 0.15 to 1.11 over the day, while the correction was applied
-    against a horizontal index of about 1.
+    A plane-of-array index once read a clear sky as anything from 0.15 to 1.11
+    over the day on the west plane, which would put a clear afternoon in the
+    cloudy bins.
     """
     hours = np.arange(
         np.datetime64("2026-11-14T18:00", "s"), np.datetime64("2026-11-15T12:00", "s"), np.timedelta64(3600, "s")
@@ -41,12 +41,7 @@ def test_every_array_learns_the_clearness_the_correction_is_applied_with() -> No
         temperature=np.full(hours.size, 22.0),
         wind_speed_10m=np.full(hours.size, 2.0),
     )
-    result = forecast(SYSTEM, grid, weather)
     daylight = np.flatnonzero(solar_geometry(times, SITE).apparent_elevation > 15.0)
 
     applied = forecast_clearness(times, SYSTEM, weather.ghi)[daylight]
-    samples = samples_from(result, SYSTEM, weather.ghi, daylight)
-    for name, entries in samples.items():
-        learned = np.array([sample.clearness for sample in entries])
-        np.testing.assert_allclose(learned, applied, err_msg=f"{name} learns a different clearness")
     assert np.all(np.abs(applied - 1.0) < 0.05), "a clear sky should read as clear"

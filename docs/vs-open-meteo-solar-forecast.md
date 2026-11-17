@@ -43,11 +43,12 @@ difference. Worth knowing: upstream's README suggests "typically around 0.93",
 and the default is 1.0, so anyone following that guidance is left with a forecast
 over-predicting by more than 40%.
 
-Soular does not ask. Its online correction learns the same constant from the
-array's own output and lands at **0.941**, and because it forgets exponentially
-it tracks soiling, pruning and degradation rather than freezing a number typed in
-once. That is a difference in kind, not in accuracy: a constant is a maintenance
-task, and a learned one is not.
+Soular does not ask. When this comparison was made, its online correction
+learned the same constant from the array's own output and landed at **0.941**.
+It has since been split in two: the panels' efficiency is measured from a year
+of clear-sky record when the shading map is built, and only the weather
+forecast's bias is learned live. That is a difference in kind, not in accuracy:
+a constant typed in is a maintenance task, and a measured one is not.
 
 So the fair summary is: **the incumbent could close most of this gap with manual
 tuning, and cannot close any of it without.**

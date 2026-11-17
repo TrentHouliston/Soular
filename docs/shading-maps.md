@@ -73,11 +73,11 @@ the Open-Meteo satellite model that covers you with `--satellite-model`.
 
 Output, in `my-maps/`:
 
-| File                     |                                                                                     |
-| ------------------------ | ----------------------------------------------------------------------------------- |
-| `transmittance_grid.npz` | The map. One entry per array. This is the file Soular wants.                        |
-| `horizon-<array>.txt`    | The fitted horizon line per array, for anything that only takes a horizon file.     |
-| `build.json`             | What went in, and how well the map predicts days it was not built from (see below). |
+| File                     |                                                                                                 |
+| ------------------------ | ----------------------------------------------------------------------------------------------- |
+| `transmittance_grid.npz` | The map, and each array's panel efficiency. One entry per array. This is the file Soular wants. |
+| `horizon-<array>.txt`    | The fitted horizon line per array, for anything that only takes a horizon file.                 |
+| `build.json`             | What went in, and how well the map predicts days it was not built from (see below).             |
 
 Copy `transmittance_grid.npz` into `config/soular/` on your Home Assistant and
 give its filename as each array's **Shading file**. One file serves every array:
@@ -91,18 +91,28 @@ well each array's clear-sky output on the held-back days is predicted with and
 without the map:
 
 ```
-array      clear samples edge width   holdout RMSE, % of capacity
-east              15,743       3.5°    22.7% ->  12.9%  (n=3,149)
-north             16,458       2.4°    22.6% ->  13.4%  (n=3,302)
+array      clear samples edge width efficiency   holdout RMSE, % of capacity
+east              15,743       3.5°      0.987    22.7% ->  12.9%  (n=3,149)
+north             16,458       2.4°      0.979    22.6% ->  13.4%  (n=3,302)
 ```
 
 The second number should be clearly lower than the first. If an array barely
 improves, either it is genuinely unshaded or its column is not the array you
 think it is — two arrays with swapped columns both get worse.
 
+**Efficiency** is what each array delivered under a satellite-verified clear sky
+over what Soular's own model predicts for it, with this map applied. The map is
+normalised to exactly 1 in open sky, so this is the part of the measurement the
+map divides out: soiling, module tolerance, wiring, and the clear-sky model's own
+bias. Soular applies it to every forecast for that array. Something well away
+from 1 -- below 0.85 or above 1.15 -- is worth a look: a wrong DC capacity, or a
+column that is not the array you think it is.
+
 ## Rebuilding
 
-Trees grow and get pruned. Rebuilding once a year is plenty. Pass `--seed` with
+Trees grow and get pruned, and panels get cleaned. Rebuilding once a year is
+plenty; rebuild sooner after cleaning the panels, since the efficiency moves
+with them. Pass `--seed` with
 the directory of a previous build to start the horizon fit from the old horizons;
 without it the fit starts from a horizon read straight off the data, which works
 just as well.

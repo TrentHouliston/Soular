@@ -112,14 +112,11 @@
         "shading_file_not_found": "No such file in your config/soular directory."
       },
       "title": "Solar array"
-    },
-    "site": { "entry_type": "Site total", "initiate_flow": { "user": "Site total" }, "step": {} }
+    }
   },
   "entity": {
     "sensor": {
-      "band_samples": { "name": "Forecast band samples" },
       "cell_temperature": { "name": "Cell temperature" },
-      "correction_factor": { "name": "Learned correction" },
       "energy_current_hour": { "name": "Estimated energy production - this hour" },
       "energy_next_hour": { "name": "Estimated energy production - next hour" },
       "energy_production_d2": { "name": "Estimated energy production - day after tomorrow" },
@@ -132,14 +129,15 @@
       "energy_production_today_remaining": { "name": "Estimated energy production - remaining today" },
       "energy_production_tomorrow": { "name": "Estimated energy production - tomorrow" },
       "last_update_forecast": { "name": "Forecast last updated" },
-      "learning_samples": { "name": "Learning samples" },
+      "panel_efficiency": { "name": "Panel efficiency" },
       "poa_irradiance": { "name": "Plane-of-array irradiance" },
       "power_highest_peak_time_today": { "name": "Highest power peak time - today" },
       "power_highest_peak_time_tomorrow": { "name": "Highest power peak time - tomorrow" },
       "power_production_now": { "name": "Estimated power production - now" },
       "power_production_now_p10": { "name": "Estimated power production - now (P10)" },
       "power_production_now_p90": { "name": "Estimated power production - now (P90)" },
-      "shading_transmittance": { "name": "Shading transmittance" }
+      "shading_transmittance": { "name": "Shading transmittance" },
+      "weather_correction": { "name": "Weather correction" }
     }
   },
   "selector": {

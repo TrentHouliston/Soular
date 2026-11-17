@@ -12,19 +12,25 @@ import pandas as pd
 
 from custom_components.soular.core.shading import from_npz
 from tools.fetch_archive import connect, fetch_satellite
+from tools.shading import efficiency
 from tools.shading import grid as grid_module
 from tools.shading.horizon import Horizon, fit, read_horizon
 from tools.shading.samples import Samples, build_samples, read_power, read_satellite
 from tools.site import load_site
 
 
-def _npz_bytes(fields: dict[str, np.ndarray]) -> bytes:
-    """Serialise the grids in the format the integration reads."""
+def _npz_bytes(
+    fields: dict[str, np.ndarray], efficiencies: dict[str, float] | None = None, dc_loss: float = 0.0
+) -> bytes:
+    """Serialise the grids, and each array's efficiency, in the format the integration reads."""
     arrays = {
         "azimuth_deg": grid_module.AZIMUTH_AXIS,
         "elevation_deg": grid_module.ELEVATION_AXIS,
         **{f"T_{name}": values for name, values in fields.items()},
     }
+    if efficiencies:
+        arrays["efficiency_dc_loss"] = np.array(dc_loss)
+        arrays.update({f"efficiency_{name}": np.array(value) for name, value in efficiencies.items()})
     buffer = io.BytesIO()
     np.savez_compressed(buffer, **arrays)  # pyright: ignore[reportArgumentType] - numpy types **kwds as its keyword options
     return buffer.getvalue()
@@ -110,14 +116,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         horizons[array.name] = fit(train, seed)
         fields[array.name] = grid_module.build(train, horizons[array.name])
 
-    payload = _npz_bytes(fields)
+    # Measured against the map just built, then stored beside it.
+    shape_only = _npz_bytes(fields)
+    measured = efficiency.measure(
+        site, samples.arrays, {array.name: from_npz(shape_only, array.name) for array in site.arrays}
+    )
+    dc_loss = site.arrays[0].dc_loss_fraction
+    payload = _npz_bytes(fields, measured, dc_loss)
     # The file is only worth writing if the integration can read it.
     grids = {array.name: from_npz(payload, array.name) for array in site.arrays}
 
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "transmittance_grid.npz").write_bytes(payload)
     report: dict[str, dict[str, float | int | bool]] = {}
-    print(f"\n{'array':10} {'clear samples':>13} {'edge width':>10}   holdout RMSE, % of capacity")
+    print(f"\n{'array':10} {'clear samples':>13} {'edge width':>10} {'efficiency':>10}   holdout RMSE, % of capacity")
     for array in site.arrays:
         horizon = horizons[array.name]
         (args.out / f"horizon-{array.name}.txt").write_text(horizon.to_text())
@@ -129,9 +141,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             "holdout_samples": n,
             "holdout_rmse_pct_without_map": round(without, 2),
             "holdout_rmse_pct_with_map": round(with_map, 2),
+            "efficiency": round(measured.get(array.name, float("nan")), 4),
         }
         print(
             f"{array.name:10} {len(samples.arrays[array.name]):13,} {horizon.width:9.1f}°"
+            f" {measured.get(array.name, float('nan')):10.3f}"
             f"   {without:5.1f}% -> {with_map:5.1f}%  (n={n:,})"
         )
 

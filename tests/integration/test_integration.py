@@ -20,7 +20,6 @@ from custom_components.soular import async_setup_entry
 from custom_components.soular.const import CONF_ALBEDO, CONF_INVERTER_AC_LIMIT, DOMAIN
 from custom_components.soular.diagnostics import async_get_config_entry_diagnostics
 from custom_components.soular.energy import async_get_solar_forecast
-from custom_components.soular.entities.device import find_device, site_identifier
 from tests.integration.conftest import ARRAY_DATA, build_entry, synthetic_weather
 
 
@@ -31,62 +30,41 @@ def state_of(hass: HomeAssistant, entity_id: str) -> str:
     return state.state
 
 
-SITE_POWER = "sensor.morisset_park_estimated_power_production_now"
-SITE_TOMORROW = "sensor.morisset_park_estimated_energy_production_tomorrow"
-SITE_PEAK_TOMORROW = "sensor.morisset_park_highest_power_peak_time_tomorrow"
-SITE_TODAY = "sensor.morisset_park_estimated_energy_production_today"
-SITE_REMAINING = "sensor.morisset_park_estimated_energy_production_remaining_today"
-SITE_PEAK_TODAY = "sensor.morisset_park_highest_power_peak_time_today"
+EAST = "sensor.morisset_park_east"
+EAST_POWER = f"{EAST}_estimated_power_production_now"
+EAST_TOMORROW = f"{EAST}_estimated_energy_production_tomorrow"
+EAST_PEAK_TOMORROW = f"{EAST}_highest_power_peak_time_tomorrow"
+EAST_TODAY = f"{EAST}_estimated_energy_production_today"
+EAST_REMAINING = f"{EAST}_estimated_energy_production_remaining_today"
+EAST_PEAK_TODAY = f"{EAST}_highest_power_peak_time_today"
 
 
-async def test_setup_creates_a_device_per_array_plus_the_site(hass: HomeAssistant, configured: MockConfigEntry) -> None:
-    """Each array is its own device, hung off the site."""
+async def test_setup_creates_a_device_per_array(hass: HomeAssistant, configured: MockConfigEntry) -> None:
+    """Each array is its own device, and there is nothing else."""
     assert configured.state is ConfigEntryState.LOADED
 
     registry = dr.async_get(hass)
     devices = dr.async_entries_for_config_entry(registry, configured.entry_id)
-    names = {device.name for device in devices}
-
-    assert "Morisset Park" in names
-    for array in ARRAY_DATA:
-        assert f"Morisset Park {array['name']}" in names
-    assert len(devices) == len(ARRAY_DATA) + 1
-
-
-async def test_arrays_hang_off_the_site_device(hass: HomeAssistant, configured: MockConfigEntry) -> None:
-    """Array devices declare the site as their parent."""
-    registry = dr.async_get(hass)
-    site = find_device(registry, configured, site_identifier(configured))
-    assert site is not None
-
-    arrays = [
-        entry
-        for entry in dr.async_entries_for_config_entry(registry, configured.entry_id)
-        if entry.name != "Morisset Park"
-    ]
-    assert arrays
-    for entry in arrays:
-        assert entry.via_device_id == site.id
+    assert {device.name for device in devices} == {f"Morisset Park {array['name']}" for array in ARRAY_DATA}
 
 
 async def test_tomorrow_has_real_energy(hass: HomeAssistant, configured: MockConfigEntry) -> None:
-    """The forecast produces energy, and the parts sum to the whole.
+    """The forecast produces energy on every array.
 
     Tomorrow rather than today, because the test can run at any time of day and
     "today" may legitimately be over.
     """
-    total = float(state_of(hass, SITE_TOMORROW))
-    assert total > 1.0, "a full clear day on 27 kWp should not be near zero"
-
     per_array = [
         float(state_of(hass, f"sensor.morisset_park_{array['name']}_estimated_energy_production_tomorrow"))
         for array in ARRAY_DATA
     ]
     assert all(value > 0.0 for value in per_array)
-    assert sum(per_array) == pytest.approx(total, rel=1e-6)
+    assert sum(per_array) > 1.0, "a full clear day on 27 kWp should not be near zero"
 
 
-async def test_every_day_of_the_week_ahead_has_a_total(hass: HomeAssistant, configured: MockConfigEntry) -> None:
+async def test_every_day_of_the_week_ahead_has_a_total(
+    hass: HomeAssistant, entity_registry_enabled_by_default: None, configured: MockConfigEntry
+) -> None:
     """Day after tomorrow through 7 days from now, as open_meteo_solar_forecast has.
 
     The synthetic sky is the same clear day every day, so each total is close to
@@ -94,15 +72,15 @@ async def test_every_day_of_the_week_ahead_has_a_total(hass: HomeAssistant, conf
     not zero, which is why this compares against tomorrow rather than checking
     for energy at all.
     """
-    tomorrow = float(state_of(hass, SITE_TOMORROW))
+    tomorrow = float(state_of(hass, EAST_TOMORROW))
     names = ["day_after_tomorrow", *(f"{days}_days_from_now" for days in range(3, 8))]
     for name in names:
-        total = float(state_of(hass, f"sensor.morisset_park_estimated_energy_production_{name}"))
+        total = float(state_of(hass, f"{EAST}_estimated_energy_production_{name}"))
         assert total == pytest.approx(tomorrow, rel=0.05), name
 
 
-async def test_the_week_ahead_is_site_level_by_default(hass: HomeAssistant, configured: MockConfigEntry) -> None:
-    """Per array, the days past tomorrow exist but start disabled."""
+async def test_the_week_ahead_starts_disabled(hass: HomeAssistant, configured: MockConfigEntry) -> None:
+    """The days past tomorrow exist but start disabled: the power series already holds them."""
     registry = er.async_get(hass)
     entity_id = registry.async_get_entity_id(
         "sensor", DOMAIN, f"{configured.entry_id}_{array_subentry(configured, 'east').subentry_id}_energy_production_d2"
@@ -131,11 +109,13 @@ async def test_geometric_twins_produce_identically_without_shading(
     assert north == pytest.approx(south, rel=1e-12)
 
 
-async def test_peak_time_lands_in_daylight(hass: HomeAssistant, configured: MockConfigEntry) -> None:
+async def test_peak_time_lands_in_daylight(
+    hass: HomeAssistant, entity_registry_enabled_by_default: None, configured: MockConfigEntry
+) -> None:
     """The peak is a real timestamp somewhere near the middle of the day."""
     from homeassistant.util import dt as dt_util  # noqa: PLC0415
 
-    peak = dt_util.parse_datetime(state_of(hass, SITE_PEAK_TOMORROW))
+    peak = dt_util.parse_datetime(state_of(hass, EAST_PEAK_TOMORROW))
     assert peak is not None
     local_hour = dt_util.as_local(peak).hour
     assert 8 <= local_hour <= 16, f"peak at {local_hour}:00 local is not plausible"
@@ -143,14 +123,14 @@ async def test_peak_time_lands_in_daylight(hass: HomeAssistant, configured: Mock
 
 async def test_power_now_is_never_negative(hass: HomeAssistant, configured: MockConfigEntry) -> None:
     """Power is zero at night, never negative."""
-    assert float(state_of(hass, SITE_POWER)) >= 0.0
+    assert float(state_of(hass, EAST_POWER)) >= 0.0
 
 
 async def test_the_forecast_series_is_kept_out_of_the_recorder(
     hass: HomeAssistant, configured: MockConfigEntry
 ) -> None:
     """The series is far over the recorder's 16 kB limit, which drops the whole row's attributes with a warning."""
-    state = hass.states.get(SITE_POWER)
+    state = hass.states.get(EAST_POWER)
     assert state is not None
     assert "forecast" in state.attributes
     assert state.state_info is not None
@@ -170,7 +150,9 @@ async def test_energy_dashboard_hook(hass: HomeAssistant, configured: MockConfig
     assert len(hours) <= 217
 
 
-async def test_today_counts_the_whole_day(hass: HomeAssistant, freezer: Any) -> None:
+async def test_today_counts_the_whole_day(
+    hass: HomeAssistant, entity_registry_enabled_by_default: None, freezer: Any
+) -> None:
     """Mid-afternoon, "today" includes the morning that has already happened.
 
     An earlier version started the series at the present instant, so "today"
@@ -193,11 +175,11 @@ async def test_today_counts_the_whole_day(hass: HomeAssistant, freezer: Any) -> 
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-        today = float(state_of(hass, SITE_TODAY))
-        remaining = float(state_of(hass, SITE_REMAINING))
+        today = float(state_of(hass, EAST_TODAY))
+        remaining = float(state_of(hass, EAST_REMAINING))
         assert today > 2 * remaining, f"today {today} kWh barely exceeds remaining {remaining} kWh"
 
-        peak = dt_util.parse_datetime(state_of(hass, SITE_PEAK_TODAY))
+        peak = dt_util.parse_datetime(state_of(hass, EAST_PEAK_TODAY))
         assert peak is not None
         assert peak < dt_util.utcnow(), "on a clear day the peak is behind us by 15:00"
 
@@ -261,7 +243,7 @@ async def test_a_site_with_no_arrays_still_loads(hass: HomeAssistant, mock_weath
     await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
-    assert float(state_of(hass, SITE_POWER)) == 0.0
+    assert er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id) == []
 
 
 async def test_reconfiguring_a_loaded_site_sets_it_up_once(hass: HomeAssistant, configured: MockConfigEntry) -> None:

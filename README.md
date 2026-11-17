@@ -26,8 +26,9 @@ it matters for getting absolute kWh right without calibration, but at a typical 
 is not where the accuracy comes from. Soular uses it because it is free and correct, not
 because it is the headline.
 
-Soular does its own Perez transposition, applies a measured graded transmittance map, and
-continuously bias-corrects against your measured output. That is all it does, on purpose.
+Soular does its own Perez transposition, applies a measured graded transmittance map that
+also carries each array's measured clear-sky efficiency, and corrects the weather forecast's
+cloudiness bias against your measured output. That is all it does, on purpose.
 Earlier versions also blended in a satellite nowcast and published a P10/P90 band from the
 weather ensemble. Neither earned its keep: the nowcast helped the first two hours and nothing
 after, and the band could never be checked against reality, because Open-Meteo keeps no
@@ -112,7 +113,7 @@ uv run lint-imports
 | Path                             |                                                                                    |
 | -------------------------------- | ---------------------------------------------------------------------------------- |
 | `custom_components/soular/`      | The integration, and nothing else: HACS installs this folder straight from `main`. |
-| `custom_components/soular/core/` | The physics and the learner. Home Assistant free by construction.                  |
+| `custom_components/soular/core/` | The physics and the corrections. Home Assistant free by construction.              |
 | `tools/shading/`                 | Builds a shading map from measured per-array power (`uv run shading-map`).         |
 | `tools/backtest.py`              | Replays the model against measured production (`uv run backtest`).                 |
 | `tools/fetch_archive.py`         | Builds the weather archive both tools read (`uv run fetch-archive`).               |

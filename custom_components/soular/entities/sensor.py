@@ -1,4 +1,4 @@
-"""Sensor entities for the site and each array."""
+"""Sensor entities, one set per array."""
 
 from datetime import timedelta
 from typing import Any
@@ -16,11 +16,10 @@ from custom_components.soular.core.types import FloatArray, TimeArray
 from custom_components.soular.entities import (
     FURTHER_DAYS,
     ArrayDiagnosticDescription,
-    SiteDiagnosticDescription,
     SoularSensorEntityDescription,
     Window,
 )
-from custom_components.soular.entities.device import array_device, array_identifier, site_device, site_identifier
+from custom_components.soular.entities.device import array_device, array_identifier
 
 # An eight-day mixed-resolution series is ~550 points and about 30 kB of JSON.
 # Recording that every five minutes would add several gigabytes a year to the
@@ -61,7 +60,12 @@ class SoularSensorBase(CoordinatorEntity[SoularCoordinator], SensorEntity):
 
 
 class SoularForecastSensor(SoularSensorBase):
-    """A sensor derived from a power series."""
+    """A sensor derived from one array's power series.
+
+    There is deliberately no site-wide copy. The energy dashboard and the
+    recorder both want one entity per array, and haeo sums several sensors
+    itself, so a total would only duplicate what the arrays already say.
+    """
 
     _unrecorded_attributes = FORECAST_UNRECORDED_ATTRIBUTES
     entity_description: SoularSensorEntityDescription
@@ -72,34 +76,30 @@ class SoularForecastSensor(SoularSensorBase):
         description: SoularSensorEntityDescription,
         entry: ConfigEntry,
         site_name: str,
-        subentry: ConfigSubentry | None = None,
+        subentry: ConfigSubentry,
     ) -> None:
-        """Set up a site-level or array-level forecast sensor."""
-        identifier = array_identifier(entry, subentry) if subentry else site_identifier(entry)
+        """Set up an array's forecast sensor."""
+        identifier = array_identifier(entry, subentry)
         super().__init__(coordinator, f"{identifier[1]}_{description.key}")
         self.entity_description = description
-        self._array = str(subentry.title) if subentry else None
-        self._attr_device_info = array_device(entry, subentry, site_name) if subentry else site_device(entry, site_name)
+        self._array = str(subentry.title)
+        self._attr_device_info = array_device(entry, subentry, site_name)
         if description.carries_forecast:
             self._attr_extra_state_attributes = {}
-        if subentry and not description.array_enabled_default:
-            self._attr_entity_registry_enabled_default = False
 
     @property
     def _series(self) -> tuple[TimeArray, FloatArray] | None:
         """Return the times and power this entity reports on."""
         result = self.coordinator.data
-        if self._array is None:
-            bound = self.entity_description.bound
-            if bound is None:
-                return result.times, result.ac_power_w
-            ratios = tuple(b.high if bound else b.low for b in self.coordinator.band_bounds)
-            scale = scale_by_day(result.times, local_window(result.times).midnights, ratios)
-            return result.times, result.ac_power_w * scale
         try:
-            return result.times, result.array(self._array).ac_power_w
+            power = result.array(self._array).ac_power_w
         except KeyError:
             return None
+        bound = self.entity_description.bound
+        if bound is None:
+            return result.times, power
+        ratios = tuple(b.high if bound else b.low for b in self.coordinator.band_bounds)
+        return result.times, power * scale_by_day(result.times, local_window(result.times).midnights, ratios)
 
     @property
     def available(self) -> bool:
@@ -155,13 +155,14 @@ class SoularForecastSensor(SoularSensorBase):
         }
 
     def _band_attributes(self) -> dict[str, Any] | None:
-        """Attach a site daily total's P10 and P90, as Solcast names them.
+        """Attach a daily total's P10 and P90, as Solcast names them.
 
-        Only on the site: the band is measured against the site's output, and
-        nothing has checked whether it holds for one array on its own.
+        The ratios are measured on the sensed arrays together and applied to
+        each array alike, so the arrays' bounds add up to the site's: one poor
+        day for the whole roof, which is what weather does.
         """
         lead = self.entity_description.lead
-        if self._array is not None or lead is None:
+        if lead is None:
             return None
         value = self.native_value
         if not isinstance(value, float):
@@ -195,7 +196,7 @@ class SoularArrayDiagnosticSensor(SoularSensorBase):
         self._attr_device_info = array_device(entry, subentry, site_name)
 
     @property
-    def native_value(self) -> float | None:
+    def native_value(self) -> Any:
         """Interpolate the underlying field at the current time."""
         result = self.coordinator.data
         try:
@@ -205,11 +206,17 @@ class SoularArrayDiagnosticSensor(SoularSensorBase):
 
         # Two of these report on the learner rather than on the forecast: what
         # the correction is currently doing, and how much evidence is behind it.
-        state = self.coordinator.learner.states.get(self._array)
-        if self.entity_description.field == "__correction__":
-            return None if state is None else state.efficiency() * 100.0
-        if self.entity_description.field == "__samples__":
-            return 0.0 if state is None else float(state.samples)
+        field = self.entity_description.field
+        if field == "__efficiency__":
+            spec = next((array for array in self.coordinator.system.arrays if array.name == self._array), None)
+            grid = self.coordinator.system.shading.get(self._array)
+            if spec is None or grid is None or grid.efficiency is None:
+                return None
+            return grid.efficiency_for(spec.dc_loss_fraction) * 100.0
+        if field == "__weather_correction__":
+            return self.coordinator.weather_correction_now * 100.0
+        if field == "__weather_fetched_at__":
+            return self.coordinator.weather_fetched_at
 
         values: FloatArray = getattr(entry, self.entity_description.field)
         now = np.datetime64(int(dt_util.utcnow().timestamp()), "s")
@@ -218,32 +225,3 @@ class SoularArrayDiagnosticSensor(SoularSensorBase):
         if self.entity_description.key == "shading_transmittance":
             return value * 100.0
         return value
-
-
-class SoularSiteDiagnosticSensor(SoularSensorBase):
-    """A site-level diagnostic read straight off the coordinator.
-
-    These answer "why does the forecast look like that?" rather than "what will
-    it produce". They start disabled; a user who never asks the question should
-    not have to see the answer.
-    """
-
-    entity_description: SiteDiagnosticDescription
-
-    def __init__(
-        self,
-        coordinator: SoularCoordinator,
-        description: SiteDiagnosticDescription,
-        entry: ConfigEntry,
-        site_name: str,
-    ) -> None:
-        """Set up a site diagnostic sensor."""
-        identifier = site_identifier(entry)
-        super().__init__(coordinator, f"{identifier[1]}_{description.key}")
-        self.entity_description = description
-        self._attr_device_info = site_device(entry, site_name)
-
-    @property
-    def native_value(self) -> Any:
-        """Read the coordinator attribute this sensor reports."""
-        return getattr(self.coordinator, self.entity_description.attribute, None)

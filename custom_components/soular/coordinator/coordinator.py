@@ -17,27 +17,14 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 import numpy as np
 
-from custom_components.soular.const import DOMAIN, LEARNING_SAMPLE_INTERVAL, RECOMPUTE_INTERVAL, UPDATE_INTERVAL
-from custom_components.soular.coordinator.actuals import (
-    Learner,
-    forecast_clearness,
-    read_percentage,
-    read_power,
-    samples_from,
-)
-from custom_components.soular.coordinator.backfill import (
-    BACKFILL_DAYS,
-    arrays_to_backfill,
-    async_read_history,
-    backfill_window,
-    replay,
-)
+from custom_components.soular.const import DOMAIN, RECOMPUTE_INTERVAL, UPDATE_INTERVAL
+from custom_components.soular.coordinator.actuals import forecast_clearness, read_percentage, read_power
+from custom_components.soular.coordinator.backfill import BACKFILL_DAYS, async_read_history, backfill_window, replay
 from custom_components.soular.core.band import BAND_LEADS, BandTracker, Bounds, hourly_snapshot
-from custom_components.soular.core.correction import build_features
-from custom_components.soular.core.geometry import solar_geometry
 from custom_components.soular.core.mask import CURTAILMENT_SOC_PCT
 from custom_components.soular.core.nwp import weather_from_hourly
 from custom_components.soular.core.pipeline import ArrayForecast, ForecastResult, SystemSpec, build_time_grid, forecast
+from custom_components.soular.core.weather_bias import WeatherBias
 from custom_components.soular.sources.open_meteo import HourlyWeather, OpenMeteoError, fetch
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,7 +45,7 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
         system: SystemSpec,
         power_sensors: dict[str, str] | None = None,
         soc_sensor: str | None = None,
-        learner: Learner | None = None,
+        weather_bias: WeatherBias | None = None,
         band: BandTracker | None = None,
     ) -> None:
         """Set up the coordinator for a configured system."""
@@ -66,13 +53,14 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
         self.system = system
         self.power_sensors = power_sensors or {}
         self.soc_sensor = soc_sensor
-        self.learner = learner or Learner()
+        self.weather_bias = weather_bias or WeatherBias()
         self.band = band or BandTracker()
         self._bounds: tuple[Bounds, ...] = self.band.bounds(dt_util.now().date().toordinal())
         self._weather: HourlyWeather | None = None
         self._weather_at: datetime | None = None
         self._weather_error: str | None = None
         self._backfilled = False
+        self._clearness_now = 1.0
 
     @property
     def weather_fetched_at(self) -> datetime | None:
@@ -85,9 +73,10 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
         return self._bounds
 
     @property
-    def band_samples(self) -> int:
-        """How many of this site's own daily ratios are behind tomorrow's band."""
-        return self._bounds[1].samples
+    def weather_correction_now(self) -> float:
+        """The weather correction applied to the present instant, as a multiplier."""
+        today = dt_util.now().date().toordinal()
+        return float(self.weather_bias.scale(np.array([self._clearness_now]), today)[0])
 
     @property
     def weather_error(self) -> str | None:
@@ -145,19 +134,18 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
             self._weather_error = None
 
     async def _async_backfill(self) -> None:
-        """Catch arrays with nothing learned up from the recorder, once.
+        """Catch an empty weather correction up from the recorder, once.
 
-        A head start, never a requirement: any failure leaves the learner to
-        sample live state as it would have anyway.
+        A head start, never a requirement: any failure leaves the correction to
+        learn from live output as it would have anyway.
         """
-        arrays = arrays_to_backfill(self.learner, self.power_sensors)
-        if not arrays:
+        if self.weather_bias.day_count or not self.power_sensors:
             return
         try:
             start, end = backfill_window(dt_util.utcnow())
-            entities = set(arrays.values()) | ({self.soc_sensor} if self.soc_sensor else set())
+            entities = set(self.power_sensors.values()) | ({self.soc_sensor} if self.soc_sensor else set())
             history = await async_read_history(self.hass, entities, start, end)
-            if not any(history.get(entity) for entity in arrays.values()):
+            if not all(history.get(entity) for entity in self.power_sensors.values()):
                 return
             weather = await fetch(
                 async_get_clientsession(self.hass),
@@ -167,80 +155,60 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
                 forecast_days=1,
             )
             soc = history.get(self.soc_sensor) if self.soc_sensor else None
-            offered = await self.hass.async_add_executor_job(
-                replay, self.learner, self.system, weather, arrays, history, soc
+            counted = await self.hass.async_add_executor_job(
+                replay, self.weather_bias, self.system, weather, self.power_sensors, history, soc, _local_day
             )
         except Exception:  # a failed head start must not fail setup
             _LOGGER.warning("Could not learn from recorded history; learning from live output only", exc_info=True)
             return
-        _LOGGER.info(
-            "Learned from %d recorded samples for %s",
-            offered,
-            ", ".join(sorted(arrays)),
-        )
-
-    def _learn(
-        self, result: ForecastResult, ghi: np.ndarray, measured: dict[str, float | None], soc: float | None
-    ) -> None:
-        """Fold the present instant's measured output into the correction."""
-        now = dt_util.utcnow()
-        if self.learner.last_sample_at is not None and now - self.learner.last_sample_at < LEARNING_SAMPLE_INTERVAL:
-            return
-
-        samples = samples_from(result, self.system, ghi, np.array([result.now_index]))
-        for name, (sample,) in samples.items():
-            value = measured.get(name)
-            if value is not None:
-                self.learner.observe(name, sample, value, soc)
+        _LOGGER.info("Learned the weather correction from %d recorded instants", counted)
 
     def _correct(self, result: ForecastResult, clearness: np.ndarray) -> ForecastResult:
-        """Apply the learned correction to every array, and to the site total."""
-        if not self.learner.states:
-            return result
+        """Scale every array, and the site total, by the weather correction.
 
-        geometry = solar_geometry(result.times, self.system.site)
-        day_of_year = np.full(result.times.size, float(dt_util.utcnow().timetuple().tm_yday))
-
-        corrected: list[ArrayForecast] = []
-        scaled = np.zeros(result.times.size)
-        original = np.zeros(result.times.size)
-        for entry in result.arrays:
-            state = self.learner.states.get(entry.name)
-            if state is None or state.samples == 0:
-                corrected.append(entry)
-                scaled += entry.ac_power_w
-                original += entry.ac_power_w
-                continue
-            factor = state.correction(
-                build_features(
-                    elevation_deg=geometry.apparent_elevation,
-                    clearness=clearness,
-                    day_of_year=day_of_year,
-                    transmittance=entry.transmittance,
-                    temperature_c=entry.cell_temperature,
-                )
-            )
-            corrected.append(
+        The panels' own efficiency is already in the forecast, from the shading
+        map; this is only how far the weather forecast's sky tends to miss.
+        """
+        scale = self.weather_bias.scale(clearness, dt_util.now().date().toordinal())
+        return ForecastResult(
+            times=result.times,
+            arrays=tuple(
                 ArrayForecast(
                     name=entry.name,
-                    dc_power_w=entry.dc_power_w * factor,
-                    ac_power_w=entry.ac_power_w * factor,
+                    dc_power_w=entry.dc_power_w * scale,
+                    ac_power_w=entry.ac_power_w * scale,
                     poa_global=entry.poa_global,
                     poa_beam=entry.poa_beam,
                     cell_temperature=entry.cell_temperature,
                     transmittance=entry.transmittance,
                 )
-            )
-            scaled += entry.ac_power_w * factor
-            original += entry.ac_power_w
-
-        del original
-        return ForecastResult(
-            times=result.times,
-            arrays=tuple(corrected),
-            ac_power_w=scaled,
+                for entry in result.arrays
+            ),
+            ac_power_w=result.ac_power_w * scale,
             clearsky=result.clearsky,
             now_index=result.now_index,
+        )
+
+    def _learn(
+        self, result: ForecastResult, clearness: np.ndarray, measured: dict[str, float | None], soc: float | None
+    ) -> None:
+        """Fold the present instant into the weather correction.
+
+        Compared for the arrays with a power sensor, together, and only with
+        every one of them read and the battery not full.
+        """
+        sensed = [entry for entry in result.arrays if entry.name in self.power_sensors]
+        if not sensed:
+            return
+        index = result.now_index
+        readings = [measured.get(entry.name) for entry in sensed]
+        usable = all(value is not None for value in readings) and (soc is None or soc < CURTAILMENT_SOC_PCT)
+        self.weather_bias.tick(
+            _local_day(int(dt_util.utcnow().timestamp())),
+            int(dt_util.utcnow().timestamp()),
+            float(clearness[index]),
+            float(sum(entry.dc_power_w[index] for entry in sensed)),
+            float(sum(value for value in readings if value is not None)) if usable else None,
         )
 
     def _compute(
@@ -267,11 +235,13 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
         )
         result = forecast(self.system, grid, series)
         result = replace(result, now_index=int(np.searchsorted(grid.times, start)))
+        clearness = forecast_clearness(grid.times, self.system, series.ghi)
+        self._clearness_now = float(clearness[result.now_index])
 
         if measured:
-            self._learn(result, series.ghi, measured, soc)
+            self._learn(result, clearness, measured, soc)
 
-        result = self._correct(result, forecast_clearness(grid.times, self.system, series.ghi))
+        result = self._correct(result, clearness)
         self._track_band(result, measured or {}, soc)
         return result
 
@@ -303,3 +273,8 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
             self.band.tick(int(dt_util.utcnow().timestamp()), total)
 
         self._bounds = self.band.bounds(day)
+
+
+def _local_day(epoch: int) -> int:
+    """Return the local calendar day holding an instant, as a date ordinal."""
+    return dt_util.as_local(dt_util.utc_from_timestamp(epoch)).date().toordinal()

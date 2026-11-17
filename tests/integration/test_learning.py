@@ -1,172 +1,53 @@
-"""The online correction, through the integration.
+"""The weather correction, through the integration.
 
-The safety properties matter more than the accuracy ones here. A calibration that
-learns from curtailed samples, or that survives a change of feature basis, or
-that moves before it has evidence, does damage that is hard to notice and harder
-to attribute.
+The safety properties matter more than the accuracy ones here. A correction that
+survives a change of what it means, or that is lost on restart, does damage that
+is hard to notice and harder to attribute.
 """
 
-import math
 from typing import Any
 
 import numpy as np
 import pytest
 
-from custom_components.soular.core.correction import FEATURE_BASIS_ID, FEATURE_COUNT, CorrectionState, build_features
-from custom_components.soular.core.mask import CURTAILMENT_SOC_PCT, MaskInputs, usable
-from custom_components.soular.learning.store import decode, encode
+from custom_components.soular.core.weather_bias import BINS, WeatherBias
+from custom_components.soular.learning.store import BASIS, decode, encode
 
 
-def trained_state(ratio: float = 0.85, count: int = 4000) -> CorrectionState:
-    """Build an estimator that has seen a steady efficiency error."""
-    rng = np.random.default_rng(7)
-    state = CorrectionState()
-    features = build_features(
-        elevation_deg=rng.uniform(15.0, 70.0, count),
-        clearness=rng.uniform(0.3, 1.1, count),
-        day_of_year=rng.uniform(0.0, 365.0, count),
-        transmittance=np.ones(count),
-        temperature_c=rng.uniform(8.0, 38.0, count),
-    )
-    for row in features:
-        state.update(row, math.log(ratio), weight=1.0)
-    return state
+def recorded(delivered: float = 0.8, days: int = 10) -> WeatherBias:
+    """Build a record where the sky delivered ``delivered`` of the forecast."""
+    bias = WeatherBias()
+    for day in range(days):
+        clearness = np.linspace(0.1, 1.0, 50)
+        bias.add(1000 + day, clearness, np.full(50, 5000.0), np.full(50, 5000.0 * delivered), 1.0)
+    return bias
 
 
 class TestPersistence:
-    """Round-tripping the estimator through storage."""
+    """Round-tripping the record through storage."""
 
     def test_state_survives_a_round_trip(self) -> None:
-        """What comes back predicts what went in."""
-        original = trained_state()
-        restored = decode(encode({"east": original}))["east"]
+        """What comes back corrects as what went in."""
+        original = recorded()
+        restored = decode(encode(original))
+        np.testing.assert_allclose(restored.bin_ratios(1100), original.bin_ratios(1100), rtol=1e-6)
+        assert restored.day_count == original.day_count
 
-        np.testing.assert_allclose(restored.theta, original.theta, rtol=1e-9)
-        assert restored.samples == original.samples
-        assert restored.efficiency() == pytest.approx(original.efficiency(), rel=1e-9)
-
-    def test_the_covariance_comes_back_positive_definite(self) -> None:
-        """Storing the Cholesky factor is what guarantees this.
-
-        A covariance reassembled element-wise from JSON can come back very
-        slightly asymmetric, and once it stops being positive definite the
-        recursive gain changes sign and the estimate diverges quietly.
-        """
-        restored = decode(encode({"east": trained_state()}))["east"]
-        eigenvalues = np.linalg.eigvalsh(restored.covariance)
-
-        assert np.all(eigenvalues > 0.0)
-        np.testing.assert_allclose(restored.covariance, restored.covariance.T, atol=1e-12)
-
-    def test_a_different_basis_is_discarded(self) -> None:
-        """Coefficients are meaningless against a basis they were not fitted to.
-
-        Reinterpreting them would apply a confident-looking correction derived
-        from features that no longer exist.
-        """
-        payload = encode({"east": trained_state()})
-        payload["feature_basis_id"] = "something-else"
-        assert decode(payload) == {}
+    def test_the_old_learner_is_discarded(self) -> None:
+        """The per-array regression it replaced means nothing here, so it is dropped, not misread."""
+        assert decode({"feature_basis_id": "v1", "arrays": {"east": {"theta": [0.0] * 8}}}).day_count == 0
+        assert decode({"basis": "something-else", "weather": encode(recorded())["weather"]}).day_count == 0
+        assert encode(recorded())["basis"] == BASIS
 
     def test_corrupt_state_is_skipped_not_fatal(self) -> None:
-        """A truncated file costs the learning, not the integration."""
-        payload: dict[str, Any] = {
-            "feature_basis_id": FEATURE_BASIS_ID,
-            "arrays": {
-                "east": {"theta": [0.1, 0.2], "cholesky": [], "samples": 5},
-                "west": encode({"west": trained_state()})["arrays"]["west"],
-            },
-        }
-        restored = decode(payload)
-        assert "east" not in restored
-        assert "west" in restored
+        """A truncated file costs the record, not the integration."""
+        payload: dict[str, Any] = {"basis": BASIS, "weather": {"days": [[1000, [1.0], [2.0]], [1001, "x", None]]}}
+        assert decode(payload).day_count == 0
 
     def test_nothing_stored_yields_nothing(self) -> None:
-        """A first run starts with no state and no complaint."""
-        assert decode(None) == {}
-        assert decode({}) == {}
-
-
-class TestCurtailmentMasking:
-    """Which measured samples are allowed to teach."""
-
-    def base(self, **overrides: Any) -> MaskInputs:
-        """Build a single healthy mid-day sample."""
-        defaults: dict[str, Any] = {
-            "predicted_w": np.array([5000.0]),
-            "actual_w": np.array([4300.0]),
-            "elevation_deg": np.array([45.0]),
-            "capacity_w": 7920.0,
-        }
-        defaults.update(overrides)
-        return MaskInputs(**defaults)
-
-    def test_a_healthy_sample_is_kept(self) -> None:
-        """The ordinary case survives every rule."""
-        assert bool(usable(self.base())[0])
-
-    def test_a_full_battery_is_excluded(self) -> None:
-        """Curtailment is lost production, not lost efficiency.
-
-        This is the rule that matters most on a battery site: the array is
-        throttled at the sunniest part of the day, which is exactly when samples
-        carry the most weight.
-        """
-        assert not bool(usable(self.base(soc_pct=np.array([CURTAILMENT_SOC_PCT + 1])))[0])
-        assert bool(usable(self.base(soc_pct=np.array([50.0])))[0])
-
-    def test_the_inverter_plateau_is_excluded(self) -> None:
-        """Output held at the limit is not output the array chose to make."""
-        assert not bool(usable(self.base(actual_w=np.array([9900.0]), ac_limit_w=10000.0))[0])
-
-    def test_a_dead_string_is_excluded(self) -> None:
-        """Near-zero output under a bright sky is a fault, not a lesson."""
-        assert not bool(usable(self.base(actual_w=np.array([10.0])))[0])
-
-    def test_low_sun_is_excluded(self) -> None:
-        """Near sunrise the ratio measures everything except efficiency."""
-        assert not bool(usable(self.base(elevation_deg=np.array([3.0])))[0])
-
-    def test_a_flat_top_is_excluded(self) -> None:
-        """Pinned output while the model says it should be climbing is curtailment.
-
-        This is what it looks like with no battery sensor to confirm it, so it
-        has to be detectable from the two series alone.
-        """
-        flat = usable(
-            MaskInputs(
-                predicted_w=np.array([5000.0, 5600.0, 6300.0]),
-                actual_w=np.array([4000.0, 4001.0, 4000.0]),
-                elevation_deg=np.full(3, 45.0),
-                capacity_w=7920.0,
-            )
-        )
-        assert not flat.any()
-
-    def test_a_genuinely_steady_hour_is_kept(self) -> None:
-        """Steady output under a steady sun is real production, not a plateau."""
-        steady = usable(
-            MaskInputs(
-                predicted_w=np.array([5000.0, 5010.0, 5005.0]),
-                actual_w=np.array([4300.0, 4301.0, 4300.0]),
-                elevation_deg=np.full(3, 45.0),
-                capacity_w=7920.0,
-            )
-        )
-        assert steady.all()
-
-    def test_a_washed_out_day_is_dropped_whole(self) -> None:
-        """A day far below expectation was an outage, not a lesson in efficiency."""
-        result = usable(
-            MaskInputs(
-                predicted_w=np.full(6, 5000.0),
-                actual_w=np.full(6, 500.0),
-                elevation_deg=np.full(6, 45.0),
-                capacity_w=7920.0,
-                day_index=np.zeros(6),
-            )
-        )
-        assert not result.any()
+        """A first run starts with no record and no complaint."""
+        assert decode(None).day_count == 0
+        np.testing.assert_allclose(decode({}).bin_ratios(1), np.ones(BINS))
 
 
 async def test_a_fresh_install_applies_no_correction(hass: Any, configured: Any) -> None:
@@ -176,20 +57,9 @@ async def test_a_fresh_install_applies_no_correction(hass: Any, configured: Any)
     checks that the absence is handled as a missing feature rather than an error.
     """
     coordinator = configured.runtime_data.coordinator
-    assert coordinator.learner.states == {}
+    assert coordinator.weather_bias.day_count == 0
+    assert coordinator.weather_correction_now == pytest.approx(1.0)
     assert coordinator.data.ac_power_w.max() > 0.0
-
-
-def test_the_feature_width_matches_the_declared_basis() -> None:
-    """The basis identifier only means something if the width matches it."""
-    features = build_features(
-        elevation_deg=np.array([45.0]),
-        clearness=np.array([0.9]),
-        day_of_year=np.array([15.0]),
-        transmittance=np.array([1.0]),
-        temperature_c=np.array([25.0]),
-    )
-    assert features.shape == (1, FEATURE_COUNT)
 
 
 async def test_learning_is_saved_when_home_assistant_stops(hass: Any, configured: Any, hass_storage: Any) -> None:
@@ -208,12 +78,12 @@ async def test_learning_is_saved_when_home_assistant_stops(hass: Any, configured
     # Let any save scheduled at setup happen, so the one at stop is what counts.
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=10))
     await hass.async_block_till_done()
-    configured.runtime_data.coordinator.learner.state_for("east").samples = 42
+    configured.runtime_data.coordinator.weather_bias.days[1234] = ([1.0] * BINS, [42.0] * BINS)
     hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
     await hass.async_block_till_done()
     # The write itself happens at the final-write stage, or here immediately.
     await hass.async_stop(force=True)
-    assert hass_storage[key]["data"]["arrays"]["east"]["samples"] == 42
+    assert hass_storage[key]["data"]["weather"]["days"][-1][2][0] == 42.0
 
 
 async def test_learning_is_saved_while_running(hass: Any, configured: Any, hass_storage: Any) -> None:
@@ -235,7 +105,7 @@ async def test_learning_is_saved_while_running(hass: Any, configured: Any, hass_
     from custom_components.soular.learning.store import SAVE_INTERVAL  # noqa: PLC0415
 
     key = f"soular.learning.{configured.entry_id}"
-    learner = configured.runtime_data.coordinator.learner
+    bias = configured.runtime_data.coordinator.weather_bias
     threads: set[int] = set()
     delay_save = Store.async_delay_save
 
@@ -245,12 +115,35 @@ async def test_learning_is_saved_while_running(hass: Any, configured: Any, hass_
 
     with patch.object(Store, "async_delay_save", spy):
         for samples in (7, 9):
-            learner.state_for("east").samples = samples
+            bias.days[1234] = ([1.0] * BINS, [float(samples)] * BINS)
             async_fire_time_changed(hass, dt_util.utcnow() + SAVE_INTERVAL + timedelta(seconds=1))
             await hass.async_block_till_done()
             # The store writes on its own zero-delay timer, which is another tick.
             async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
             await hass.async_block_till_done()
-            assert hass_storage[key]["data"]["arrays"]["east"]["samples"] == samples
+            assert hass_storage[key]["data"]["weather"]["days"][-1][2][0] == samples
 
     assert threads == {threading.get_ident()}, "saves ran off the event loop thread"
+
+
+async def test_the_correction_scales_what_is_served(hass: Any, configured: Any) -> None:
+    """A record of the forecast overshooting lowers every array's forecast by the learned ratio."""
+    from homeassistant.util import dt as dt_util  # noqa: PLC0415
+
+    coordinator = configured.runtime_data.coordinator
+    before = coordinator.data.array("east").ac_power_w.copy()
+    today = dt_util.now().date().toordinal()
+    one_per_bin = np.array([0.1, 0.3, 0.5, 0.7, 0.8, 1.0])
+    for day in range(1, 31):
+        coordinator.weather_bias.add(today - day, one_per_bin, np.full(BINS, 50_000.0), np.full(BINS, 40_000.0), 1.0)
+    expected = coordinator.weather_bias.bin_ratios(today)
+    np.testing.assert_allclose(expected, expected[0])
+    assert expected[0] < 0.95
+
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    after = coordinator.data.array("east").ac_power_w
+    lit = before > 100.0
+    np.testing.assert_allclose(after[lit] / before[lit], expected[0], rtol=1e-6)
+    state = hass.states.get("sensor.morisset_park_east_estimated_energy_production_tomorrow")
+    assert state is not None

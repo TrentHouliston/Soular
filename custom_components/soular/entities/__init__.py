@@ -61,14 +61,9 @@ class SoularSensorEntityDescription(SensorEntityDescription):
     """A sensor, and how to compute it from a power series."""
 
     value: Callable[[TimeArray, FloatArray, Window], SeriesValue]
-    # Only the power sensor carries the full series; attaching it to every sensor
+    # Only the power sensors carry the full series; attaching it to every sensor
     # would multiply a 20 kB attribute across a dozen entities.
     carries_forecast: bool = False
-    # Site-only sensors would be meaningless or duplicated per array.
-    site_only: bool = False
-    # Whether the per-array copy starts enabled. The days past tomorrow are a
-    # site-level planning number; six more sensors on every array is clutter.
-    array_enabled_default: bool = True
     # A daily total's distance in days from today, which picks its P10/P90 band.
     lead: int | None = None
     # A pessimistic or optimistic copy of the power forecast: 0 scales each day
@@ -104,7 +99,6 @@ SENSOR_DESCRIPTIONS: Final[tuple[SoularSensorEntityDescription, ...]] = (
             native_unit_of_measurement=UnitOfPower.WATT,
             suggested_display_precision=0,
             carries_forecast=True,
-            site_only=True,
             bound=bound,
             value=lambda times, power, window: power_at(times, power, window.now),
         )
@@ -143,7 +137,9 @@ SENSOR_DESCRIPTIONS: Final[tuple[SoularSensorEntityDescription, ...]] = (
             device_class=SensorDeviceClass.ENERGY,
             native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
             suggested_display_precision=1,
-            array_enabled_default=False,
+            # Planning numbers the power series already holds; six more sensors
+            # on every array would be clutter for anyone who does not want them.
+            entity_registry_enabled_default=False,
             lead=offset,
             value=lambda times, power, window, offset=offset: energy_between(times, power, *window.day(offset)),
         )
@@ -181,14 +177,14 @@ SENSOR_DESCRIPTIONS: Final[tuple[SoularSensorEntityDescription, ...]] = (
         key="power_highest_peak_time_today",
         translation_key="power_highest_peak_time_today",
         device_class=SensorDeviceClass.TIMESTAMP,
-        site_only=True,
+        entity_registry_enabled_default=False,
         value=lambda times, power, window: _peak(times, power, window.today_start, window.today_end),
     ),
     SoularSensorEntityDescription(
         key="power_highest_peak_time_tomorrow",
         translation_key="power_highest_peak_time_tomorrow",
         device_class=SensorDeviceClass.TIMESTAMP,
-        site_only=True,
+        entity_registry_enabled_default=False,
         value=lambda times, power, window: _peak(times, power, window.today_end, window.tomorrow_end),
     ),
 )
@@ -227,24 +223,35 @@ ARRAY_DIAGNOSTICS: Final[tuple[ArrayDiagnosticDescription, ...]] = (
         field="cell_temperature",
     ),
     ArrayDiagnosticDescription(
-        key="correction_factor",
-        translation_key="correction_factor",
+        key="panel_efficiency",
+        translation_key="panel_efficiency",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="%",
         suggested_display_precision=1,
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
-        # Not a forecast field: read off the learner. Handled specially in the
-        # sensor, but declared here so it shares translations and icons.
-        field="__correction__",
+        # Read off the shading map, which measured it.
+        field="__efficiency__",
     ),
     ArrayDiagnosticDescription(
-        key="learning_samples",
-        translation_key="learning_samples",
+        key="weather_correction",
+        translation_key="weather_correction",
         state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="%",
+        suggested_display_precision=1,
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
-        field="__samples__",
+        # Read off the coordinator: the correction applied right now.
+        field="__weather_correction__",
+    ),
+    ArrayDiagnosticDescription(
+        key="last_update_forecast",
+        translation_key="last_update_forecast",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        # Read off the coordinator: when the weather behind the forecast arrived.
+        field="__weather_fetched_at__",
     ),
     ArrayDiagnosticDescription(
         key="shading_transmittance",
@@ -261,31 +268,4 @@ ARRAY_DIAGNOSTICS: Final[tuple[ArrayDiagnosticDescription, ...]] = (
 DIAGNOSTIC_KEYS: Final[frozenset[str]] = frozenset(entry.key for entry in ARRAY_DIAGNOSTICS)
 
 
-@dataclass(frozen=True, kw_only=True)
-class SiteDiagnosticDescription(SensorEntityDescription):
-    """A site-level diagnostic read off the coordinator itself."""
-
-    attribute: str
-
-
-SITE_DIAGNOSTICS: Final[tuple[SiteDiagnosticDescription, ...]] = (
-    SiteDiagnosticDescription(
-        key="last_update_forecast",
-        translation_key="last_update_forecast",
-        device_class=SensorDeviceClass.TIMESTAMP,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        entity_registry_enabled_default=False,
-        attribute="weather_fetched_at",
-    ),
-    SiteDiagnosticDescription(
-        key="band_samples",
-        translation_key="band_samples",
-        state_class=SensorStateClass.MEASUREMENT,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        entity_registry_enabled_default=False,
-        attribute="band_samples",
-    ),
-)
-
-SITE_DIAGNOSTIC_KEYS: Final[frozenset[str]] = frozenset(entry.key for entry in SITE_DIAGNOSTICS)
-ALL_SENSOR_KEYS: Final[frozenset[str]] = SENSOR_KEYS | DIAGNOSTIC_KEYS | SITE_DIAGNOSTIC_KEYS
+ALL_SENSOR_KEYS: Final[frozenset[str]] = SENSOR_KEYS | DIAGNOSTIC_KEYS

@@ -223,3 +223,68 @@ def test_from_horizon_rejects_junk() -> None:
     """A non-numeric row is a corrupt file, not a comment."""
     with pytest.raises(ShadingFormatError, match="not numeric"):
         from_horizon("0\t10\n90\tbanana\n180\t5\n")
+
+
+def efficiency_npz(**extra: Any) -> bytes:
+    """Build a uniform open-sky map for one array, with optional efficiency fields."""
+    return npz_bytes(
+        azimuth_deg=np.arange(0.0, 361.0), elevation_deg=np.arange(0.0, 91.0), T_east=np.ones((361, 91)), **extra
+    )
+
+
+def test_a_map_carries_its_arrays_efficiency() -> None:
+    """The efficiency the map builder measured comes back with the map."""
+    grid = from_npz(efficiency_npz(efficiency_east=np.array(1.04), efficiency_dc_loss=np.array(0.14)), "east")
+    assert grid.efficiency == pytest.approx(1.04)
+    assert grid.efficiency_for(0.14) == pytest.approx(1.04)
+
+
+def test_an_older_map_has_no_efficiency() -> None:
+    """Maps built before efficiency was stored load as they always did, uncorrected."""
+    grid = from_npz(efficiency_npz(), "east")
+    assert grid.efficiency is None
+    assert grid.efficiency_for(0.14) == 1.0
+
+
+def test_a_different_dc_loss_is_compensated_not_counted_twice() -> None:
+    """The efficiency was measured with one DC loss; an array configured with another gets the same total."""
+    grid = from_npz(efficiency_npz(efficiency_east=np.array(1.0), efficiency_dc_loss=np.array(0.14)), "east")
+    assert (1.0 - 0.05) * grid.efficiency_for(0.05) == pytest.approx(1.0 - 0.14)
+
+
+def test_an_implausible_efficiency_is_refused() -> None:
+    """A broken build is an error, not a forecast doubled or halved."""
+    with pytest.raises(ShadingFormatError, match="efficiency"):
+        from_npz(efficiency_npz(efficiency_east=np.array(3.0)), "east")
+
+
+def test_the_model_applies_the_efficiency() -> None:
+    """Every array's DC power is scaled by its map's efficiency, and nothing else changes."""
+    from custom_components.soular.core.clearsky import clear_sky  # noqa: PLC0415
+    from custom_components.soular.core.geometry import solar_geometry  # noqa: PLC0415
+    from custom_components.soular.core.pipeline import SystemSpec, WeatherSeries, forecast  # noqa: PLC0415
+    from custom_components.soular.core.types import ArraySpec, TimeGrid  # noqa: PLC0415
+    from tests.core.conftest import INVERTER, SITE  # noqa: PLC0415
+
+    times = np.arange(np.datetime64("2026-11-15T00:00", "s"), np.datetime64("2026-11-15T06:00", "s"), 900)
+    sky = clear_sky(times, SITE, solar_geometry(times, SITE))
+    weather = WeatherSeries(
+        ghi=sky.ghi,
+        dni=sky.dni,
+        dhi=sky.dhi,
+        temp_air=np.full(times.size, 20.0),
+        wind_speed_10m=np.full(times.size, 2.0),
+    )
+    grid = TimeGrid(times=times, step_seconds=np.full(times.size, 900.0))
+    east = (ArraySpec(name="east", azimuth_deg=84.0, tilt_deg=25.0, dc_capacity_w=7920.0),)
+
+    def run(data: bytes) -> np.ndarray:
+        system = SystemSpec(
+            site=SITE, arrays=east, inverters={"default": INVERTER}, shading={"east": from_npz(data, "east")}
+        )
+        return forecast(system, grid, weather).array("east").dc_power_w
+
+    plain = run(efficiency_npz())
+    scaled = run(efficiency_npz(efficiency_east=np.array(0.9), efficiency_dc_loss=np.array(0.14)))
+    assert plain.max() > 1000.0
+    np.testing.assert_allclose(scaled, plain * 0.9)
