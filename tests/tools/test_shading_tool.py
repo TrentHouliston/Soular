@@ -150,3 +150,21 @@ def test_the_written_map_carries_the_efficiency() -> None:
     loaded = from_npz(payload, "roof")
     assert loaded.efficiency == pytest.approx(0.97)
     assert loaded.efficiency_dc_loss == pytest.approx(0.14)
+
+
+def test_the_weather_prior_fit_is_energy_weighted_by_bin() -> None:
+    """Each band's ratio is its measured energy over its forecast energy; a thin band stays at 1."""
+    from custom_components.soular.core.weather_bias import BINS  # noqa: PLC0415
+    from tools.weather_prior import MIN_BIN_WH, fit  # noqa: PLC0415
+
+    hours = 1000
+    clearness = np.concatenate([np.full(hours, 0.95), np.full(hours, 0.5), np.full(3, 0.1)])
+    predicted = np.concatenate([np.full(hours, 5000.0), np.full(hours, 3000.0), np.full(3, 100.0)])
+    actual = predicted * np.concatenate([np.full(hours, 0.96), np.full(hours, 0.8), np.full(3, 3.0)])
+    usable = np.ones(predicted.size, dtype=bool)
+    ratio, energy = fit(predicted, actual, clearness, usable)
+    assert ratio.size == BINS
+    assert ratio[-1] == pytest.approx(0.96)
+    assert ratio[2] == pytest.approx(0.8)
+    assert energy[0] < MIN_BIN_WH
+    assert ratio[0] == 1.0

@@ -23,6 +23,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from custom_components.soular.core.types import FloatArray
+from custom_components.soular.core.weather_bias import BINS, MAX_SCALE, MIN_SCALE
 
 # Width of the soft edge used when converting a hard horizon to a graded grid.
 # A step function aliases badly against a five-minute sun track, which moves
@@ -68,6 +69,10 @@ class TransmittanceGrid:
     values: NDArray[np.uint8]
     efficiency: float | None = None
     efficiency_dc_loss: float = 0.0
+    # The site's year-fitted weather correction, one ratio per clearness bin of
+    # :mod:`custom_components.soular.core.weather_bias`. Site-wide, so every
+    # array's grid from one file carries the same one.
+    weather_prior: tuple[float, ...] | None = None
 
     def efficiency_for(self, dc_loss_fraction: float) -> float:
         """Return the multiplier for an array configured with ``dc_loss_fraction``."""
@@ -159,12 +164,22 @@ def from_npz(data: bytes, array_name: str) -> TransmittanceGrid:
         azimuth = np.asarray(archive["azimuth_deg"], dtype=np.float64)
         elevation = np.asarray(archive["elevation_deg"], dtype=np.float64)
         values = _quantise(np.asarray(archive[key], dtype=np.float64))
+        weather_prior = (
+            tuple(float(v) for v in np.asarray(archive["weather_prior"], dtype=np.float64).reshape(-1))
+            if "weather_prior" in available
+            else None
+        )
         efficiency_key = f"efficiency_{array_name}"
         efficiency = float(archive[efficiency_key]) if efficiency_key in available else None
         dc_loss = float(archive["efficiency_dc_loss"]) if "efficiency_dc_loss" in available else 0.0
 
     if efficiency is not None and not (MIN_EFFICIENCY <= efficiency <= MAX_EFFICIENCY):
         msg = f"efficiency {efficiency:.3f} for {array_name!r} is outside {MIN_EFFICIENCY}-{MAX_EFFICIENCY}"
+        raise ShadingFormatError(msg)
+    if weather_prior is not None and (
+        len(weather_prior) != BINS or not all(MIN_SCALE <= v <= MAX_SCALE for v in weather_prior)
+    ):
+        msg = f"weather_prior must be {BINS} ratios between {MIN_SCALE} and {MAX_SCALE}"
         raise ShadingFormatError(msg)
     azimuth, values = _drop_duplicate_endpoint(azimuth, values)
     return TransmittanceGrid(
@@ -173,6 +188,7 @@ def from_npz(data: bytes, array_name: str) -> TransmittanceGrid:
         values=values,
         efficiency=efficiency,
         efficiency_dc_loss=dc_loss,
+        weather_prior=weather_prior,
     )
 
 

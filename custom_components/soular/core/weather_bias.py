@@ -13,11 +13,14 @@ that arrived to energy forecast over the last :data:`WINDOW_DAYS` days, for the
 arrays together. One correction for the site, because cloud covers the whole
 roof at once, and per array it would only learn the arrays' differences again.
 
-**A strong prior, not a ramp.** Each bin's ratio is pulled to 1 by
-:data:`PRIOR_WH` of imaginary perfectly-forecast energy, so a bin moves only
-once it has seen about two good days' worth of its own. Without it a cold start
-learns a week of cloudy weather as the site's permanent climate, which is how
-the previous learner came to cut every sunny day by a quarter.
+**A strong prior, not a ramp.** Each bin's ratio is pulled towards its prior
+by :data:`PRIOR_WH` of imaginary energy, so a bin moves only once it has seen
+about two good days' worth of its own. Without it a cold start learns a week of
+cloudy weather as the site's permanent climate, which is how the previous
+learner came to cut every sunny day by a quarter. The prior is what a year of
+this site's own record settled on, fitted offline and carried in the shading
+map, or 1 where there is none: the bias is steady enough across a year that the
+fit is most of the answer, and the live record follows the season on top.
 
 **Measured, not modelled.** Curtailed and unread instants are left out of both
 sides, as everywhere else.
@@ -58,9 +61,14 @@ def bin_of(clearness: FloatArray) -> np.ndarray:
     return np.digitize(np.nan_to_num(np.asarray(clearness, dtype=np.float64), nan=1.0), BIN_EDGES)
 
 
-def ratios(predicted_wh: np.ndarray, actual_wh: np.ndarray) -> FloatArray:
-    """Return each bin's correction from its totals, pulled towards 1 by the prior."""
-    raw = (np.asarray(actual_wh) + PRIOR_WH) / (np.asarray(predicted_wh) + PRIOR_WH)
+def ratios(predicted_wh: np.ndarray, actual_wh: np.ndarray, prior: FloatArray | None = None) -> FloatArray:
+    """Return each bin's correction from its totals, pulled towards the prior.
+
+    The prior is the correction a year of this site's record settled on, when
+    the shading map carries one, and otherwise 1: no correction.
+    """
+    centre = np.ones(BINS) if prior is None else np.asarray(prior, dtype=np.float64)
+    raw = (np.asarray(actual_wh) + PRIOR_WH * centre) / (np.asarray(predicted_wh) + PRIOR_WH)
     return np.clip(raw, MIN_SCALE, MAX_SCALE)
 
 
@@ -71,6 +79,9 @@ class WeatherBias:
     # day ordinal -> (predicted Wh per bin, actual Wh per bin)
     days: dict[int, tuple[list[float], list[float]]] = field(default_factory=dict)
     last_tick: int | None = None
+    # Where each bin starts before the live record has a say: the year's fit,
+    # from the shading map. Configuration, not learned state, so never stored.
+    prior: tuple[float, ...] | None = None
 
     def add(self, day: int, clearness: FloatArray, predicted_w: FloatArray, actual_w: FloatArray, hours: float) -> None:
         """Fold in instants of one day at once, each lasting ``hours``."""
@@ -104,7 +115,7 @@ class WeatherBias:
             if today - WINDOW_DAYS <= day < today:
                 predicted += p
                 actual += a
-        return ratios(predicted, actual)
+        return ratios(predicted, actual, None if self.prior is None else np.array(self.prior))
 
     def scale(self, clearness: FloatArray, today: int) -> FloatArray:
         """Return the correction for each instant of a forecast made ``today``."""

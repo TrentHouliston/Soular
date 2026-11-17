@@ -85,6 +85,7 @@ async def async_get_config_entry_diagnostics(
         today = dt_util.now().date().toordinal()
         diagnostics["weather_correction"] = {
             "days": coordinator.weather_bias.day_count,
+            "prior": coordinator.weather_bias.prior,
             "by_forecast_clearness": [round(float(r), 3) for r in coordinator.weather_bias.bin_ratios(today)],
         }
         diagnostics["band"] = [

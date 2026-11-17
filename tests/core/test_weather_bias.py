@@ -114,3 +114,24 @@ def test_round_trip_and_garbage() -> None:
     assert restored.last_tick == 123
     assert decode({"days": [[DAY, [1.0], [1.0]]]}).day_count == 0
     assert decode("nonsense").day_count == 0
+
+
+def test_a_prior_is_where_an_empty_record_starts() -> None:
+    """With no live record, the correction is the year's fit."""
+    prior = (1.1, 1.0, 0.9, 0.88, 0.87, 0.95)
+    bias = WeatherBias(prior=prior)
+    np.testing.assert_allclose(bias.bin_ratios(DAY), prior)
+
+
+def test_the_live_record_moves_away_from_the_prior() -> None:
+    """A season that differs from the year pulls the correction its way, held back the same as from 1."""
+    bias = WeatherBias(prior=(1.0,) * BINS)
+    for day in range(WINDOW_DAYS - 1):
+        bias.add(DAY + day, np.array([CLEAR]), np.array([100_000.0]), np.array([80_000.0]), 1.0)
+    (scale,) = bias.scale(np.array([CLEAR]), DAY + WINDOW_DAYS - 1)
+    assert scale == pytest.approx(0.8, abs=0.02)
+
+
+def test_the_prior_is_not_stored() -> None:
+    """It is configuration from the map, so a changed map is never overridden by an old copy."""
+    assert "prior" not in encode(WeatherBias(prior=(0.9,) * BINS))
