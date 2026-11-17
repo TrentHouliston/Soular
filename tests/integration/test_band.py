@@ -92,13 +92,12 @@ async def test_the_calibration_diagnostic_starts_disabled(hass: HomeAssistant, c
 async def test_a_measured_day_becomes_a_ratio(hass: HomeAssistant, mock_weather: Any, freezer: Any) -> None:
     """A day of readings, compared with the midnight forecast, yields that day's ratio.
 
-    Setup and the first update after midnight go through the real update path,
-    reading the power sensors; the readings in between are fed to the tracker
-    directly, because recomputing the forecast every ten minutes of a simulated
-    day is too slow for a CI runner.
+    Setup goes through the real path, reading the power sensors and taking the
+    day's snapshot. The clock is only moved afterwards, and only around calls
+    into the tracker: a forecast recomputed under a frozen clock stalls the
+    event loop against its worker thread on a slow runner.
     """
     await hass.config.async_set_time_zone("Australia/Sydney")
-    freezer.move_to(dt_util.start_of_local_day() + timedelta(minutes=1))
     arrays = tuple({**array, CONF_POWER_SENSOR: f"sensor.pv_{array['name']}"} for array in ARRAY_DATA)
     for array in ARRAY_DATA:
         hass.states.async_set(f"sensor.pv_{array['name']}", "1000", {"unit_of_measurement": "W"})
@@ -111,6 +110,7 @@ async def test_a_measured_day_becomes_a_ratio(hass: HomeAssistant, mock_weather:
     band = coordinator.band
     day = dt_util.now().date().toordinal()
     assert band.ledger is not None
+    assert band.ledger.last_tick is not None, "setup did not read the power sensors"
     forecast_wh = band.snapshots[day].energy_wh(band.ledger.start, band.ledger.end)
     assert forecast_wh > 0
 
@@ -123,7 +123,7 @@ async def test_a_measured_day_becomes_a_ratio(hass: HomeAssistant, mock_weather:
         coordinator._track_band(coordinator.data, readings, None)
         freezer.tick(timedelta(seconds=MAX_TICK_SECONDS))
     freezer.move_to(dt_util.start_of_local_day(midnight.date() + timedelta(days=1)) + timedelta(minutes=1))
-    await coordinator.async_refresh()
+    coordinator._track_band(coordinator.data, readings, None)
 
     residuals = [r for r in band.residuals if r.day == day and r.lead == 0]
     assert len(residuals) == 1
