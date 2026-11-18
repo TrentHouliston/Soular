@@ -147,3 +147,33 @@ async def test_the_correction_scales_what_is_served(hass: Any, configured: Any) 
     np.testing.assert_allclose(after[lit] / before[lit], expected[0], rtol=1e-6)
     state = hass.states.get("sensor.morisset_park_east_estimated_energy_production_tomorrow")
     assert state is not None
+
+
+async def test_the_maps_weather_prior_is_where_the_correction_starts(hass: Any) -> None:
+    """A map carrying the year's fit starts the correction there instead of at 1."""
+    import io  # noqa: PLC0415
+
+    from custom_components.soular.coordinator.coordinator import SoularCoordinator  # noqa: PLC0415
+    from custom_components.soular.core.pipeline import SystemSpec  # noqa: PLC0415
+    from custom_components.soular.core.shading import from_npz  # noqa: PLC0415
+    from custom_components.soular.core.types import ArraySpec  # noqa: PLC0415
+    from tests.core.conftest import INVERTER, SITE  # noqa: PLC0415
+
+    prior = np.array([1.2, 1.08, 0.86, 0.87, 0.88, 0.96])
+    buffer = io.BytesIO()
+    np.savez(
+        buffer,
+        azimuth_deg=np.arange(0.0, 361.0),
+        elevation_deg=np.arange(0.0, 91.0),
+        T_east=np.ones((361, 91)),
+        weather_prior=prior,
+    )
+    east = ArraySpec(name="east", azimuth_deg=84.0, tilt_deg=25.0, dc_capacity_w=7920.0)
+    system = SystemSpec(
+        site=SITE,
+        arrays=(east,),
+        inverters={"default": INVERTER},
+        shading={"east": from_npz(buffer.getvalue(), "east")},
+    )
+    coordinator = SoularCoordinator(hass, "Test", system)
+    np.testing.assert_allclose(coordinator.weather_bias.bin_ratios(1), prior)

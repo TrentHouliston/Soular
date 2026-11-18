@@ -63,11 +63,18 @@ scales each future instant by the ratio for its level. It is one correction for
 the site, measured on the arrays that have a sensor, because cloud covers the
 whole roof at once.
 
-It moves slowly on purpose. Each level is held at "no correction" until it has
-seen about two good days' worth of its own energy, so one cloudy week cannot
-teach it that every day is cloudy. Instants when the battery is full are left
-out, because the inverter is throttling the panels then rather than the sky
-under-delivering.
+It moves slowly on purpose, and it starts from a year of evidence. A shading
+map built with Soular's tools carries each level's ratio fitted from your own
+year of record (see [shading-maps.md](shading-maps.md)), and the live record
+follows the season on top of that; each level needs about two good days' worth
+of its own before it moves far from the year's figure. Without such a map each
+level starts at "no correction" instead, so one cloudy week cannot teach it that
+every day is cloudy.
+
+Instants when the battery is full are left out, because the inverter is
+throttling the panels then rather than the sky under-delivering. So are instants
+when an array is off -- reading next to nothing in sunshine, or far out of step
+with the others -- because a tripped string is not the weather.
 
 You do not have to wait for it either. On a fresh install Soular replays the
 last week of these sensors' history from the recorder against the weather for

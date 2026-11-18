@@ -108,6 +108,25 @@ bias. Soular applies it to every forecast for that array. Something well away
 from 1 -- below 0.85 or above 1.15 -- is worth a look: a wrong DC capacity, or a
 column that is not the array you think it is.
 
+## Adding the weather correction's starting point
+
+Soular corrects how far the weather forecast's sky tends to miss, by how sunny
+the forecast was. Live, that needs weeks of record; a year of it is better
+still, and you already have one. With the map built, fit it and write it into
+the map:
+
+```bash
+uv run weather-prior --db solar.db --arrays arrays.toml \
+    --shading my-maps/transmittance_grid.npz --cache backtest_cache.db \
+    --start 2025-10-24 --end 2026-10-21 --out my-maps/transmittance_grid.npz
+```
+
+It replays the year through Soular's own model at honest lead times, against
+Open-Meteo's archived forecasts in `--cache` (fetched with `fetch-archive`), and
+prints each band's ratio and the energy behind it. Start it from the first day
+every array was producing: days before that read as the forecast promising sun
+that never came.
+
 ## Rebuilding
 
 Trees grow and get pruned, and panels get cleaned. Rebuilding once a year is

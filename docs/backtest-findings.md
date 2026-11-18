@@ -243,6 +243,35 @@ full most sunny afternoons, and the inverter's daily counter does not know what
 it was throttled out of -- so the five-minute error, which excludes curtailed
 instants, is the fairer measure there.
 
+**Commissioning.** The record starts producing on 17 October 2025, but only the
+west and south strings were connected until 24 October. Those seven days read as
+the forecast promising far more sun than arrived, and they are in the tables
+above. From 24 October on, the comparison of how to learn the weather
+correction, each month scored with a model fitted on the others and a week's
+gap either side, on uncurtailed measured energy:
+
+| weather correction                                    | typical day |  mean day |      bias |  hourly RMSE |
+| ----------------------------------------------------- | ----------: | --------: | --------: | -----------: |
+| none                                                  |       12.5% |     24.3% |    +10.0% |     2,682 Wh |
+| six clearness bands, fitted on the year               |       11.6% |     20.2% |     +0.3% |     2,566 Wh |
+| bands plus season, sun height, lead, yesterday's miss |       11.3% |     20.6% |     +1.7% |     2,574 Wh |
+| six bands over the last 60 days                       |       11.5% |     20.1% |     +0.7% |     2,571 Wh |
+| **the year's bands, refined by the last 60 days**     |   **11.5%** | **19.7%** | **−0.2%** | **2,566 Wh** |
+
+The richer model is no better: what the forecast's sky says about the error is
+almost all in how clear it said the sky would be, and yesterday's miss correlates
+only 0.2 with today's. The year's fit as the starting point is what ships, written
+into the map by `weather-prior`, with the last 60 days on top for the season --
+cloudy forecasts overshoot by a quarter in summer and barely at all in winter.
+
+The P10/P90 band was also tried conditioned on the forecast's clearness, and on
+yesterday's miss. Neither beat the flat rolling band, which over the year left
+9.2% of days below P10 and 10.4% above P90 at a mean width of ×1.78; the
+conditioned bands came out wider and no better placed. The ensemble's spread
+does track the size of a day's miss (a correlation of 0.5 to 0.6 across three
+models), but Open-Meteo archives it only from 16 August 2026, and two months
+are too few to fit and check a band on. It is now being archived for that.
+
 Two things that were tried and did not survive:
 
 - **A live upper envelope** -- the second-best of the last thirty days' clear-sky

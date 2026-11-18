@@ -40,28 +40,36 @@ re-scaled so an ablation measures skill rather than bias.
 
 ## Does it actually do better?
 
-Replayed against a year of measured five-minute production (October 2025 to October 2026,
-about a million samples on days held out from any fitting), at honest lead times:
+Replayed against a year of measured five-minute production (24 October 2025, when
+every array was first producing, to 21 October 2026; about half a million samples on days
+held out from any fitting), at honest lead times:
 
 |                                                    | RMSE as served | bias as served | RMSE re-scaled |
 | -------------------------------------------------- | -------------: | -------------: | -------------: |
-| **Soular**                                         |    **2,119 W** |     **+161 W** |        2,092 W |
-| Soular without the learned correction              |        2,209 W |         +424 W |        2,100 W |
-| Soular without shading                             |        3,077 W |       +1,220 W |        2,530 W |
-| `ha-open-meteo-solar-forecast`, same horizon files |        2,675 W |         +773 W |        2,140 W |
+| **Soular**                                         |    **2,015 W** |       **+3 W** |        2,014 W |
+| Soular without the weather correction              |        2,055 W |         +198 W |        2,022 W |
+| Soular without shading                             |        2,852 W |       +1,014 W |        2,458 W |
+| `ha-open-meteo-solar-forecast`, same horizon files |        2,572 W |         +738 W |        2,079 W |
 
-That is 21% lower error and 79% less bias than the incumbent as a user would see it, on a
-27.3 kWp site (2,119 W is 7.8% of capacity). "Re-scaled" gives every model its own best
-constant gain, fitted on other days, which isolates the *shape* of the forecast from its
-calibration: there the gap narrows to 2%. Most of the practical difference is calibration,
-which Soular learns from your inverter and the incumbent expects you to type in.
+That is 22% lower error than the incumbent as a user would see it, and essentially no
+bias against its 738 W, on a 27.3 kWp site (2,015 W is 7.4% of capacity). "Re-scaled"
+gives every model its own best constant gain, fitted on other days, which isolates the
+*shape* of the forecast from its calibration: there the gap narrows to 3%. Most of the
+practical difference is calibration: Soular measures the panels' efficiency once, from
+your own record, and learns the weather forecast's bias from your inverter, where the
+incumbent expects you to type a constant in.
+
+The Soular row starts its weather correction from nothing on the first day, as a fresh
+install without a fitted map would. Starting it from a year's fit instead, as a map built
+with `weather-prior` does, is worth a little more again (see
+[docs/backtest-findings.md](docs/backtest-findings.md)).
 
 One caveat on that table: the shading map was built from this same year, so for the
 map those numbers are partly in-sample. The clean test is a map built only from data up to
 2026-08-08 and scored on the ten weeks after it, which serves 1,936 W.
 
 The rest of the error is mostly the weather. Given the sky as the satellite actually observed
-it, rather than as it was forecast, the same model scores 1,580 W. No amount of modelling
+it, rather than as it was forecast, the same model scores 1,328 W. No amount of modelling
 the roof better touches that difference.
 
 The incumbent emulation and the earlier, longer comparison are in

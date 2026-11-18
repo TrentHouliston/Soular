@@ -288,3 +288,19 @@ def test_the_model_applies_the_efficiency() -> None:
     scaled = run(efficiency_npz(efficiency_east=np.array(0.9), efficiency_dc_loss=np.array(0.14)))
     assert plain.max() > 1000.0
     np.testing.assert_allclose(scaled, plain * 0.9)
+
+
+def test_a_map_carries_the_sites_weather_prior() -> None:
+    """The year's weather fit comes back with every array's grid from the file."""
+    prior = np.array([1.2, 1.08, 0.86, 0.87, 0.88, 0.96])
+    grid = from_npz(efficiency_npz(weather_prior=prior), "east")
+    assert grid.weather_prior == pytest.approx(tuple(prior))
+    assert from_npz(efficiency_npz(), "east").weather_prior is None
+
+
+def test_a_malformed_weather_prior_is_refused() -> None:
+    """The wrong number of bins, or an absurd ratio, is a broken build."""
+    with pytest.raises(ShadingFormatError, match="weather_prior"):
+        from_npz(efficiency_npz(weather_prior=np.array([1.0, 1.0])), "east")
+    with pytest.raises(ShadingFormatError, match="weather_prior"):
+        from_npz(efficiency_npz(weather_prior=np.full(6, 5.0)), "east")

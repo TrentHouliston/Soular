@@ -21,7 +21,7 @@ from custom_components.soular.const import DOMAIN, RECOMPUTE_INTERVAL, UPDATE_IN
 from custom_components.soular.coordinator.actuals import forecast_clearness, read_percentage, read_power
 from custom_components.soular.coordinator.backfill import BACKFILL_DAYS, async_read_history, backfill_window, replay
 from custom_components.soular.core.band import BAND_LEADS, BandTracker, Bounds, hourly_snapshot
-from custom_components.soular.core.mask import CURTAILMENT_SOC_PCT
+from custom_components.soular.core.mask import CURTAILMENT_SOC_PCT, outage
 from custom_components.soular.core.nwp import weather_from_hourly
 from custom_components.soular.core.pipeline import ArrayForecast, ForecastResult, SystemSpec, build_time_grid, forecast
 from custom_components.soular.core.weather_bias import WeatherBias
@@ -54,6 +54,10 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
         self.power_sensors = power_sensors or {}
         self.soc_sensor = soc_sensor
         self.weather_bias = weather_bias or WeatherBias()
+        # The year's fit, if the shading map carries one; the same in every grid from one file.
+        self.weather_bias.prior = next(
+            (grid.weather_prior for grid in system.shading.values() if grid.weather_prior is not None), None
+        )
         self.band = band or BandTracker()
         self._bounds: tuple[Bounds, ...] = self.band.bounds(dt_util.now().date().toordinal())
         self._weather: HourlyWeather | None = None
@@ -195,14 +199,23 @@ class SoularCoordinator(DataUpdateCoordinator[ForecastResult]):
         """Fold the present instant into the weather correction.
 
         Compared for the arrays with a power sensor, together, and only with
-        every one of them read and the battery not full.
+        every one of them read, the battery not full and nothing switched off.
         """
         sensed = [entry for entry in result.arrays if entry.name in self.power_sensors]
         if not sensed:
             return
         index = result.now_index
         readings = [measured.get(entry.name) for entry in sensed]
-        usable = all(value is not None for value in readings) and (soc is None or soc < CURTAILMENT_SOC_PCT)
+        capacity = {array.name: array.dc_capacity_w for array in self.system.arrays}
+        usable = (
+            all(value is not None for value in readings)
+            and (soc is None or soc < CURTAILMENT_SOC_PCT)
+            and not outage(
+                [value or 0.0 for value in readings],
+                [float(entry.dc_power_w[index]) for entry in sensed],
+                [capacity.get(entry.name, 0.0) for entry in sensed],
+            )
+        )
         self.weather_bias.tick(
             _local_day(int(dt_util.utcnow().timestamp())),
             int(dt_util.utcnow().timestamp()),

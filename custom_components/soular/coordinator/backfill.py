@@ -21,7 +21,7 @@ from homeassistant.core import HomeAssistant
 import numpy as np
 
 from custom_components.soular.coordinator.actuals import forecast_clearness
-from custom_components.soular.core.mask import CURTAILMENT_SOC_PCT
+from custom_components.soular.core.mask import CURTAILMENT_SOC_PCT, outage
 from custom_components.soular.core.nwp import weather_from_hourly
 from custom_components.soular.core.pipeline import SystemSpec, forecast
 from custom_components.soular.core.types import TimeGrid
@@ -85,8 +85,8 @@ def replay(
 
     Each five-minute mean is compared against the model at the middle of its
     period, run on the weather Open-Meteo has for that time, for the arrays
-    together. An instant counts only with every array read and the battery not
-    full. Returns how many instants counted.
+    together. An instant counts only with every array read, the battery not full
+    and nothing switched off. Returns how many instants counted.
     """
     stamps = sorted({stamp for entity in arrays.values() for stamp in history.get(entity, {})})
     if not stamps:
@@ -112,13 +112,19 @@ def replay(
         diffuse=weather.diffuse,
     )
     result = forecast(system, grid, series)
-    predicted = np.sum([entry.dc_power_w for entry in result.arrays if entry.name in arrays], axis=0)
+    names = [name for name in arrays if name in {entry.name for entry in result.arrays}]
+    per_array = np.array([result.array(name).dc_power_w for name in names])
+    predicted = per_array.sum(axis=0)
     clearness = forecast_clearness(times, system, series.ghi)
+    capacity = {array.name: array.dc_capacity_w for array in system.arrays}
+    capacities = [capacity.get(name, 0.0) for name in names]
 
     measured = np.full(times.size, np.nan)
-    readings = np.array([[history.get(entity, {}).get(int(s), np.nan) for s in starts] for entity in arrays.values()])
-    complete = np.isfinite(readings).all(axis=0)
+    readings = np.array([[history.get(arrays[name], {}).get(int(s), np.nan) for s in starts] for name in names])
+    complete = np.asarray(np.isfinite(readings).all(axis=0), dtype=bool)
     measured[complete] = readings[:, complete].sum(axis=0)
+    off = [k for k in np.flatnonzero(complete) if outage(readings[:, k].tolist(), per_array[:, k].tolist(), capacities)]
+    complete[off] = False
     if soc is not None:
         charge = np.array([soc.get(int(s), np.nan) for s in starts])
         complete &= ~(charge >= CURTAILMENT_SOC_PCT)

@@ -149,3 +149,19 @@ async def test_a_fresh_install_learns_from_history_at_setup(hass: HomeAssistant)
         await coordinator.async_refresh()
         assert history.await_count == 1, "the history is read once, not on every refresh"
         assert fetch.await_args_list[1].kwargs["past_days"] == BACKFILL_DAYS + 1
+
+
+def test_an_array_that_is_off_teaches_nothing() -> None:
+    """A second array reading zero in full sun is an outage, not cloud."""
+    weather = synthetic_weather(hours=24 * (BACKFILL_DAYS + 3), history_hours=24 * (BACKFILL_DAYS + 1))
+    west = ArraySpec(name="west", azimuth_deg=264.0, tilt_deg=25.0, dc_capacity_w=7920.0)
+    system = SystemSpec(site=SITE, arrays=(EAST, west), inverters={"default": INVERTER})
+    east = recorded_week(weather, delivered=1.0)
+    dead = dict.fromkeys(east, 0.0)
+    bias = WeatherBias()
+    arrays = {"east": "sensor.east", "west": "sensor.west"}
+    counted = replay(bias, system, weather, arrays, {"sensor.east": east, "sensor.west": dead}, None, utc_day)
+    working = replay(WeatherBias(), system, weather, arrays, {"sensor.east": east, "sensor.west": east}, None, utc_day)
+    assert counted < working, "daylight with west dead should not count"
+    tomorrow = utc_day(int(dt_util.utcnow().timestamp())) + 1
+    assert bias.bin_ratios(tomorrow).min() > 0.95, "nothing was learned as a dark sky"

@@ -11,6 +11,7 @@ dependencies = ["homeassistant>=2026.1.1", "numpy>=2.3.2", "pvlib>=0.15.2"]
 backtest = "tools.backtest:main"
 fetch-archive = "tools.fetch_archive:main"
 shading-map = "tools.shading.cli:main"
+weather-prior = "tools.weather_prior:main"
 
 [dependency-groups]
 dev = [
@@ -202,6 +203,14 @@ allow_modules = [
     "tools.incumbent",
     "tools.site",
 ]
+
+# The prior is fitted on exactly the forecast the backtest scores, so it reaches
+# the model only through `core` and the backtest's own replay.
+[[tool.importlinter.contracts]]
+name = "weather prior only uses core and the backtest"
+type = "allowlist"
+source_modules = ["tools.weather_prior"]
+allow_modules = ["custom_components.soular.core", "numpy", "tools.backtest", "tools.site"]
 
 # A map is only valid for the optics it was measured through, so the map builder
 # reaches the physics only through `core` -- the code the integration forecasts with.
